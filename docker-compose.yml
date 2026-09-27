@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build: .
+    command: ["streamlit", "run", "streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8501:8501"
