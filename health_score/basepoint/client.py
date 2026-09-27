@@ -72,9 +72,12 @@ class FSSClient:
             )
         except requests.RequestException as e:
             raise BasepointUnavailableError(f"BASEPOINT is unreachable: {type(e).__name__}") from e
-        if resp.status_code >= 500:
-            raise BasepointUnavailableError(f"BASEPOINT returned HTTP {resp.status_code}")
         body = _json(resp)
+        if resp.status_code >= 500:
+            # BASEPOINT answers an unknown company code with HTTP 500 wrapping a 404
+            if _mentions_not_found(body):
+                raise AuthenticationError("Company code not recognised")
+            raise BasepointUnavailableError(f"BASEPOINT returned HTTP {resp.status_code}")
         data = (body or {}).get("data") or {}
         tenant_raw = data.get("data") if isinstance(data.get("data"), dict) else data
         if resp.status_code != 200 or not tenant_raw.get("_id"):
@@ -182,6 +185,11 @@ def _json(resp):
         return resp.json()
     except ValueError:
         return None
+
+
+def _mentions_not_found(body):
+    text = str((body or {}).get("error") or (body or {}).get("message") or "") if isinstance(body, dict) else ""
+    return "404" in text or "not found" in text.lower()
 
 
 def _error_text(resp, body):

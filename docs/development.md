@@ -28,6 +28,7 @@ The tests do not connect to BASEPOINT. They use a fake client (`tests/conftest.p
 
 | Test file | Contents |
 |---|---|
+| `tests/test_client.py` | The BASEPOINT client: login, unknown company codes, outages and the tenant field whitelist |
 | `tests/test_engine.py` | Measure scores, bands, weights and the supplier tracking factor |
 | `tests/test_scoring.py` | The collector, the measures and the engine together |
 | `tests/test_service.py` | The scoring service |
