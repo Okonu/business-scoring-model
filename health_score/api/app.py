@@ -8,6 +8,7 @@ Run:
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from health_score import __version__
@@ -35,6 +36,13 @@ def create_app(settings: Settings | None = None, service: ScoringService | None 
         title="Business Health Score API",
         description="Scores a BASEPOINT business from all the data its products hold.",
         version=__version__,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.settings = settings
     app.state.service = service or ScoringService(settings)
