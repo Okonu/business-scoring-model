@@ -18,6 +18,15 @@ class ScoreRequest(Credentials):
     as_of_date: date | None = Field(None, description="Reference date; defaults to today (UTC)")
 
 
+class SessionScoreRequest(BaseModel):
+    """Score a business using an active session token from base_backend or frontend."""
+
+    company_code: str = Field(..., min_length=3, max_length=64, examples=["XXXX-000000"])
+    token: str = Field(..., min_length=1, description="Active JWT session token")
+    user: dict[str, Any] | None = Field(None, description="Optional user details (name, role, is_admin)")
+    as_of_date: date | None = Field(None, description="Reference date; defaults to today (UTC)")
+
+
 class Business(BaseModel):
     id: str | None
     name: str | None
