@@ -24,13 +24,10 @@ async def create_score(body: schemas.ScoreRequest, service: Annotated[ScoringSer
 
 @router.post("/scores/session", response_model=schemas.ScoreResponse, summary="Score a business with session token")
 async def create_score_from_session(
-    body: schemas.SessionScoreRequest,
-    service: Annotated[ScoringService, Depends(get_service)]
+    body: schemas.SessionScoreRequest, service: Annotated[ScoringService, Depends(get_service)]
 ):
     """
     Score a business using an active JWT session token (e.g. from base_backend gateway).
     No PIN required.
     """
-    return await run_in_threadpool(
-        service.score_with_token, body.company_code, body.token, body.user, body.as_of_date
-    )
+    return await run_in_threadpool(service.score_with_token, body.company_code, body.token, body.user, body.as_of_date)
