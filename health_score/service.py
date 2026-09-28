@@ -59,7 +59,13 @@ class ScoringService:
         _annotate(result, tenant, user, data, client.coverage, time.monotonic() - started)
         return result
 
-    def score_with_token(self, company_code: str, token: str, user_info: dict | None = None, as_of: date | None = None) -> dict:
+    def score_with_token(
+        self,
+        company_code: str,
+        token: str,
+        user_info: dict | None = None,
+        as_of: date | None = None,
+    ) -> dict:
         """
         Score a business as at `as_of` using an existing session token (no PIN required)
 
