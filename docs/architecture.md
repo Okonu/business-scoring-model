@@ -29,9 +29,24 @@ health_score/
 │   ├── collector.py       collect(): get all data and make standard tables
 │   └── errors.py          AuthenticationError, BasepointUnavailableError
 ├── scoring/
-│   ├── registry.py        Dimensions, measures, weights and thresholds
-│   ├── measures.py        compute_measures(): one calculation for each measure
-│   └── engine.py          score_business(): the scorecard
+│   ├── registry.py        The methodology as data: weights, thresholds, red flags, bands
+│   ├── scale.py           A measure value to a score from 0 to 100; a score to a band
+│   ├── aggregation.py     Measures to dimensions to the total; the credibility rule
+│   ├── shops.py           The score of each shop and the shop network measure
+│   ├── red_flags.py       The red flags and their limits
+│   ├── report.py          Drivers, aging totals and the response format
+│   ├── engine.py          score_business(): the steps in order
+│   └── measures/
+│       ├── __init__.py    compute_measures(): all measures for a business or a shop
+│       ├── window.py      The time windows (T3M, P3M, T6M, T12M)
+│       ├── profile.py     The facts that decide which measures apply
+│       ├── products.py    The BASEPOINT products in use
+│       ├── suppliers.py   Supplier tiers, traceability and the minimum purchase base
+│       ├── costs.py       Cost of goods sold and gross margin
+│       ├── receivables.py Open receivables and payables, and days past due
+│       ├── signals.py     Red flag inputs that are not measures
+│       └── sales.py, cash.py, profit.py, customers.py, operations.py, formality.py
+│                          The measures of each dimension
 ├── api/
 │   ├── app.py             create_app(): the FastAPI application
 │   ├── schemas.py         Request and response models
@@ -87,30 +102,38 @@ The collector makes the `transactions` table. This table has one row for each sa
 
 ## Scoring layer
 
+Each module in the scoring layer has one responsibility.
+
 ### Registry
 
-`registry.py` contains the scoring rules as data:
+`registry.py` contains the methodology as data:
 
 - The 6 dimensions and their weights
-- The 75 measures, with their weights and thresholds
-- The bands, the supplier tiers and the minimum data rules
+- The 77 measures, with their weights, thresholds and evidence basis (S, E, B or C)
+- The gross margin thresholds for each sector
+- The red flags and their limits, the bands, the supplier tiers and the minimum data rules
 
 To change a weight or a threshold, change this file. Then increase `ENGINE_VERSION`.
 
 ### Measures
 
-`compute_measures()` calculates the value of each measure. If the data for a measure does not exist, the function does not return that measure. The function never returns 0 for missing data.
+`compute_measures()` calculates the value of each measure. The `measures` package has one module for each dimension. `profile.py` calculates the facts that decide which measures apply, for example a cash business, a walk-in business and the minimum purchase base.
+
+If the data for a measure does not exist, the function does not return that measure. The function never returns 0 for missing data.
 
 ### Engine
 
 `score_business()` does these steps:
 
-1. It changes each measure value into a score from 0 to 100.
-2. It calculates each dimension score. It uses only the measures that have data.
-3. It calculates the health score from the dimension scores and the fixed weights.
-4. It applies the red flag limits.
-5. It calculates the confidence.
-6. It calculates a score for each shop.
+1. It changes each measure value into a score from 0 to 100 (`scale.py`).
+2. It calculates each dimension score from the measures that have data (`aggregation.py`).
+3. It applies the credibility rule. If the measures with data have less than half of the weight of a dimension, the dimension score moves toward the peer median (50 until peer data exists).
+4. It calculates the health score from the dimension scores and the fixed weights.
+5. It applies the red flag limits (`red_flags.py`).
+6. It calculates the confidence and the status.
+7. It calculates a score for each shop and the shop network measure (`shops.py`).
+
+Two measures, revenue per staff member and capacity utilization, use sector percentiles. They do not get a score until 30 businesses of the same type have a score. The response shows their values in `measures_pending_benchmark`.
 
 ## Service layer
 

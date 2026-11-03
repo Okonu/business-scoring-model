@@ -49,7 +49,7 @@ class FSSClient:
         self.retries = retries
         self.session = requests.Session()
         # Many requests run in parallel; keep a connection for each
-        adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=32)
+        adapter = requests.adapters.HTTPAdapter(pool_connections=16, pool_maxsize=128)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
         self.coverage = []
@@ -108,6 +108,40 @@ class FSSClient:
             "name": body.get("name"),
             "role": body.get("role"),
             "is_admin": bool(body.get("isAdmin")),
+        }
+        return tenant, user
+
+    def authenticate_with_token(self, company_code, token, user_data=None):
+        """
+        Verify the company code, then attach an existing session token.
+
+        Returns:
+            tuple: (tenant, user) with only non-sensitive fields
+        """
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/tenants/verify",
+                json={"companyCode": company_code},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as e:
+            raise BasepointUnavailableError(f"BASEPOINT is unreachable: {type(e).__name__}") from e
+        body = _json(resp)
+        if resp.status_code >= 500:
+            if _mentions_not_found(body):
+                raise AuthenticationError("Company code not recognised")
+            raise BasepointUnavailableError(f"BASEPOINT returned HTTP {resp.status_code}")
+        data = (body or {}).get("data") or {}
+        tenant_raw = data.get("data") if isinstance(data.get("data"), dict) else data
+        if resp.status_code != 200 or not tenant_raw.get("_id"):
+            raise AuthenticationError("Company code not recognised")
+        tenant = _extract_tenant(tenant_raw)
+
+        self.session.headers.update({"Authorization": f"Bearer {token}", "companycode": company_code})
+        user = {
+            "name": (user_data or {}).get("name") or "Admin",
+            "role": (user_data or {}).get("role") or "admin",
+            "is_admin": (user_data or {}).get("is_admin", True) if user_data else True,
         }
         return tenant, user
 

@@ -18,6 +18,15 @@ class ScoreRequest(Credentials):
     as_of_date: date | None = Field(None, description="Reference date; defaults to today (UTC)")
 
 
+class SessionScoreRequest(BaseModel):
+    """Score a business using an active session token from base_backend or frontend."""
+
+    company_code: str = Field(..., min_length=3, max_length=64, examples=["XXXX-000000"])
+    token: str = Field(..., min_length=1, description="Active JWT session token")
+    user: dict[str, Any] | None = Field(None, description="Optional user details (name, role, is_admin)")
+    as_of_date: date | None = Field(None, description="Reference date; defaults to today (UTC)")
+
+
 class Business(BaseModel):
     id: str | None
     name: str | None
@@ -32,6 +41,9 @@ class Dimension(BaseModel):
     label: str
     weight: float
     score: float
+    measured_score: float | None
+    credibility: float
+    measured_share: float
     imputed: bool
     measures_available: int
     measures_total: int
@@ -49,12 +61,21 @@ class Measure(BaseModel):
     weight_in_dimension: float
     weight_in_score: float
     supplier: bool
+    basis: str
 
 
 class MeasureUnavailable(BaseModel):
     id: str
     label: str
     dimension: str
+
+
+class MeasurePendingBenchmark(BaseModel):
+    id: str
+    label: str
+    dimension: str
+    value: float
+    unit: str
 
 
 class RedFlag(BaseModel):
@@ -119,6 +140,7 @@ class ScoreResponse(BaseModel):
     dimensions: dict[str, Dimension]
     measures: list[Measure]
     measures_not_available: list[MeasureUnavailable]
+    measures_pending_benchmark: list[MeasurePendingBenchmark]
     red_flags: list[RedFlag]
     drivers: Drivers
     shops: list[Shop]

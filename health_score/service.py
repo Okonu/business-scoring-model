@@ -59,6 +59,30 @@ class ScoringService:
         _annotate(result, tenant, user, data, client.coverage, time.monotonic() - started)
         return result
 
+    def score_with_token(
+        self,
+        company_code: str,
+        token: str,
+        user_info: dict | None = None,
+        as_of: date | None = None,
+    ) -> dict:
+        """
+        Score a business as at `as_of` using an existing session token (no PIN required)
+
+        Returns:
+            dict: the full result (see api.schemas.ScoreResponse)
+        """
+        started = time.monotonic()
+        client = self.client_factory(base_url=self.settings.fss_api_url, timeout=self.settings.fss_timeout_seconds)
+        tenant, user = client.authenticate_with_token(company_code.strip(), token, user_info)
+        logger.info("Scoring business %s with session token", tenant.get("tenant_code"))
+
+        as_of = as_of or datetime.now(UTC).date()
+        data = collect(client, tenant, user, as_of.isoformat())
+        result = score_business(data)
+        _annotate(result, tenant, user, data, client.coverage, time.monotonic() - started)
+        return result
+
 
 def _business_block(tenant: dict) -> dict:
     return {

@@ -56,9 +56,9 @@ The CI workflow runs the lint, the format check and the tests on each push and p
 
 ## Add a measure
 
-1. Add the measure to `MEASURES` in `registry.py`. Give it a unique `id`, a dimension, a weight, a kind and the thresholds.
+1. Add the measure to `MEASURES` in `registry.py`. Give it a unique `id`, a dimension, a weight, a kind, the thresholds and the evidence basis (`S`, `E`, `B` or `C`).
 2. Change the weights of the other measures in the same dimension. The total must be 100.
-3. Calculate the value in `compute_measures()` in `health_score/scoring/measures.py`. Put the value in the `v` dictionary with the same `id`.
+3. Calculate the value in the module of its dimension in `health_score/scoring/measures/`, for example `cash.py`. Return the value in the dictionary with the same `id`. If the rule that decides whether the measure applies is shared, put it in `profile.py`.
 4. If the data for the measure does not exist, do not set a value. Do not set 0.
 5. Add a test.
 6. Increase `ENGINE_VERSION`.
@@ -72,6 +72,9 @@ The measure kinds are:
 | `lower` | A smaller value is better. The score is 100 at `good` and 0 at `poor`. |
 | `range` | The best values are between `good` and `good_high`. The score is 0 at `poor` and at `poor_high`. |
 | `score` | The value is already a score from 0 to 100. |
+| `benchmark` | Good and Poor are sector percentiles (75th and 10th). The measure does not get a score until 30 businesses of the same type have a score. |
+
+Set `sector_thresholds=True` if Good and Poor change with the sector. The sector thresholds are in `GROSS_MARGIN_BY_SECTOR`.
 
 ## Add a BASEPOINT dataset
 

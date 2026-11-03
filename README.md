@@ -71,20 +71,20 @@ The interactive API documentation is at `http://localhost:8100/docs`.
 
 ## How the score works
 
-The application calculates 75 measures. Each measure gets a score from 0 to 100.
+The application calculates 77 measures. Each measure gets a score from 0 to 100.
 
 The measures are in 6 dimensions. Each dimension has a fixed weight:
 
 | Dimension | Weight |
 |---|---|
-| Sales performance | 22% |
-| Cash, collections and payables | 22% |
+| Cash, collections and payables | 25% |
+| Sales performance | 20% |
 | Operational stability | 18% |
-| Profitability and cost control | 13% |
-| Customer and revenue base | 13% |
-| Formality and compliance | 12% |
+| Profitability and cost control | 15% |
+| Customer and revenue base | 12% |
+| Formality and compliance | 10% |
 
-The health score is the weighted sum of the 6 dimension scores. Red flags can set a maximum on the score.
+The health score is the weighted sum of the 6 dimension scores. If a dimension has data for less than half of its weight, its score moves toward the peer median. Red flags can set a maximum on the score. More BASEPOINT products give more evidence. They do not give more points.
 
 The score has a band:
 
