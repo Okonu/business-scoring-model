@@ -1,7 +1,7 @@
 # Business Health Score
 
 - **Status:** Implemented in engine version 0.3.0.
-- **Source:** the "Business Health Score" methodology document (October 2026).
+- **Source:** the "Business Health Score" methodology document (October 2026): [PDF](Business%20Health%20Score%20Methodology.pdf).
 - **Data source:** BASEPOINT / FSS (schema: [`ERD.md`](ERD.md)).
 - **Code:** `health_score/scoring/registry.py` holds every number in this document.
 
