@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "business-health-score"
-version = "0.2.0"
+version = "0.3.0"
 description = "Scores a BASEPOINT business from all the data its products hold"
 readme = "README.md"
 requires-python = ">=3.11"

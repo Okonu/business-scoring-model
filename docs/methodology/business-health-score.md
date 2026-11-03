@@ -1,441 +1,514 @@
-# Business Health Score — Draft Methodology
+# Business Health Score
 
-- **Status:** Implemented (engine version 0.2.0). Weights and thresholds are starting proposals, not agreed values.
-- **Date:** 2026-09-26
-- **Data source:** BASEPOINT / FSS (schema: [`ERD.md`](ERD.md); API: `api.hospitality.reliatech.co.ke`)
-- **Companion to:** [`credit-scoring-methodology.md`](credit-scoring-methodology.md)
+- **Status:** Implemented in engine version 0.3.0.
+- **Source:** the "Business Health Score" methodology document (October 2026).
+- **Data source:** BASEPOINT / FSS (schema: [`ERD.md`](ERD.md)).
+- **Code:** `health_score/scoring/registry.py` holds every number in this document.
 
----
+## 1 Introduction
 
-## 1. Purpose and principles
+### 1.1 What the score measures
 
-The health score answers: *how healthy is this business overall?* The business scored is the **tenant** (a BASEPOINT business).
+The health score answers one question: how healthy is this business overall? It is a number from 0 to 100. A higher number means a healthier business. It is built only from what the business records in BASEPOINT: its sales, payments, invoices, stock, staff and suppliers. Nobody fills in a form.
 
-### 1.1 Principles
+The score looks at six things, which we call dimensions:
 
-1. **Any one product is enough to score a business.** BASEPOINT sells standalone products: Duka (POS, inventory, customers, shops), Pesa (accounting), Bandu (HR and payroll), Mteja (CRM) and Dala (property). A business using only one of them must still get a full, comparable score.
-2. **More products mean more evidence, plus a slight advantage.** The score is built from **six fixed dimensions with fixed weights**. Each product contributes *measures* to those same dimensions; no product adds a dimension or weight of its own. A business with five products and a business with one are scored on the same scale. Extra products make the estimate more precise, reported separately as **confidence** (§7). The only direct advantage is one deliberately small measure, **ecosystem depth** (§3.6), worth at most about 2 points.
-3. **Fixed thresholds, not comparison with other businesses.** Each measure scores 0–100 against fixed Good/Poor thresholds, so one outlier business can't move anyone else's score. Sector benchmarks replace some thresholds once there's enough data (§6.3), and are then held fixed between quarterly refreshes.
-4. **Supplier data where it exists, weighted more when tracked.** Businesses aren't required to record suppliers or link inventory to them. When they do (suppliers, purchase orders, deliveries, bills, supplier-linked inventory), that data feeds payables, procurement, sell-through and traceability measures. The more completely a supplier's goods are tracked from purchase to sale, the more those measures weigh (§3.9). When there's no supplier data, those measures don't apply and nothing is penalized.
+1. **Sales:** does the business sell steadily, and are sales growing or shrinking?
+2. **Cash:** does the money it earns actually come in, on time, and does it pay its own bills on time?
+3. **Profit:** is there money left after paying for goods, staff and other costs?
+4. **Customers:** does income come from many customers who come back, or from a few?
+5. **Stability:** how long has it traded, and are staff, stock and shops steady?
+6. **Formality:** does it keep books, issue receipts, pay taxes and take digital payments?
 
-### 1.2 Business and shops
+Each dimension is measured by several measures. A measure is one number from the records, such as the share of sales that was actually paid. Each measure is scored from 0 to 100. Measures are averaged into a dimension score, and the six dimension scores are averaged into the overall score.
 
-A business operates one or more **shops**, and almost every record carries a `shop_id`. Scores are produced at two levels:
+Each score is reported with three companions:
 
-| Level | What it is |
-|---|---|
-| **Business** | The headline score, from consolidated data across all shops |
-| **Shop** | The same dimensions calculated on each shop's own data, to show which shops lift or drag the business |
+- a **band**, from Strong to Distressed, so the number has a plain meaning;
+- a **confidence** level, High, Medium or Low, which says how much data the score rests on;
+- the list of **products used**, for example "Duka only" or "Duka + Pesa + Bandu".
 
----
+**Table 1: The six dimensions**
 
-## 2. Dimensions
-
-| # | Dimension | Weight | Question |
-|---|---|---|---|
-| 1 | **Sales performance** | 22% | Is the business selling steadily and growing? |
-| 2 | **Cash, collections and payables** | 22% | Does the money it earns come in on time, and does it pay what it owes on time? |
-| 3 | **Profitability and cost control** | 13% | Does it make money on what it sells? |
-| 4 | **Customer and revenue base** | 13% | Is its income spread widely, and do customers come back? |
-| 5 | **Operational stability** | 18% | Is it stable: staff, stock, capacity, shops, tenure? |
-| 6 | **Formality and compliance** | 12% | Does it run like a formal business: digital payments, tax, books, statutory obligations? |
-
-These weights never change with the products a business uses.
-
----
-
-## 3. Data point register
-
-**Every behavioural data point in BASEPOINT is weighted.** Each one feeds a measure, and each measure has a fixed weight inside one dimension. The "Sources" column lists which products can supply it. A business gets whichever measures its products allow. Within a dimension, the weights of the available measures are re-normalized to 100%; the dimension's own weight never changes. So a data point from an extra product sharpens a dimension without adding weight to it.
-
-Each measure scores 0–100 on a **piecewise-linear scale**: at or better than Good = 100, at or worse than Poor = 0, linear in between. The thresholds are starting proposals.
-
-### 3.1 Sales performance · 22%
-
-**Revenue** is the union of these sources, **de-duplicated**:
-- **Duka:** completed POS orders (`order_amount`).
-- **Pesa invoices:** accounting invoices (`source = accounting`, `direction = customer`, status not `Draft` or `Voided`) that aren't linked to an order.
-- **Pesa sales receipts:** receipts **not** linked to an invoice. These are cash sales recorded in accounting. A receipt linked to an invoice (`invoice_id`) is the payment for that invoice, not new revenue.
-- **Dala:** rent invoices and property sale payments.
-
-POS orders automatically create invoices (`source = pos`, with `order_id`). Those are the same sales and are **not counted again**.
-
-A **transaction** is one completed order, unlinked sales receipt, accounting invoice or rent invoice.
-
-| Measure | Data points | Sources | Good | Poor | Weight |
-|---|---|---|---|---|---|
-| Daily transaction volume: average transactions per trading day, T3M | Orders, receipts, invoices | Duka, Pesa, Dala | ≥ 50 / day | ≤ 2 / day | 10% |
-| Daily transaction value: average revenue per trading day, T3M | Same | Duka, Pesa, Dala | ≥ KES 50,000 / day | ≤ KES 1,000 / day | 10% |
-| Revenue growth: T3M vs P3M | Same | Duka, Pesa, Dala | ≥ +10% | ≤ −30% | 14% |
-| Year-on-year growth (needs 15+ months) | Same | Duka, Pesa, Dala | ≥ +10% | ≤ −30% | 8% |
-| Revenue volatility: coefficient of variation of monthly revenue, T12M | Same | Duka, Pesa, Dala | ≤ 0.15 | ≥ 0.60 | 12% |
-| Trading continuity: months with revenue in T12M | Same | Duka, Pesa, Dala | 12 | ≤ 6 | 6% |
-| Trading days: days with sales ÷ days in T3M | Transaction dates | Duka, Pesa | ≥ 85% | ≤ 30% | 6% |
-| Transaction count trend: T3M vs P3M | Transaction count | Duka, Pesa, Dala | ≥ +5% | ≤ −30% | 6% |
-| Average transaction value trend: T3M vs P3M | Revenue ÷ transactions | Duka, Pesa | ≥ 0% | ≤ −25% | 4% |
-| Revenue leakage: (discounts + voided items) ÷ gross sales | `discount_amount`, void reports, receipt `total_discount` | Duka, Pesa | ≤ 3% | ≥ 20% | 7% |
-| Refunds and credit notes ÷ revenue | Refunds, notes | Pesa | ≤ 1% | ≥ 10% | 4% |
-| Recurring revenue share: subscriptions, packages and leases ÷ revenue | Subscriptions, packages, leases | Duka, Dala | ≥ 30% | 0% | 5% |
-| Forward bookings: bookings and consultations scheduled in the next 30 days vs the last 30 days | Schedules, consultations | Duka | ≥ 1.0× | ≤ 0.5× | 3% |
-| Sales target attainment: actual ÷ target | Sales targets | Mteja | ≥ 100% | ≤ 60% | 3% |
-| Lead conversion rate, T6M | Leads, lead stages | Mteja | ≥ 25% | ≤ 5% | 2% |
-
-**Volume and value are scale measures.** Their fixed thresholds are starting points. Scale differs so much by business type that these two measures move to **sector percentiles** as soon as there are enough businesses per type (§6.3).
-
-Recurring revenue has Poor = 0%. It only applies when the business offers subscriptions, packages or leases.
-
-### 3.2 Cash, collections and payables · 22%
-
-| Measure | Data points | Sources | Good | Poor | Weight |
-|---|---|---|---|---|---|
-| Cash realization: cash received ÷ revenue, T3M | Order payments, invoice payments, sales receipts, rent payments | Duka, Pesa, Dala | ≥ 95% | ≤ 60% | 19% |
-| Severe overdue ratio (receivables): 60+ days past due ÷ total open | AR aging, rent aging | Pesa, Dala | ≤ 5% | ≥ 40% | 11% |
-| DSO: receivables ÷ credit sales in T3M × 90 | Invoices; Duka proxy: Σ `Customer.current_balance` | Pesa, Dala, Duka | ≤ 30 | ≥ 120 | 11% |
-| Weighted average days past due (receivables) | AR aging, rent aging | Pesa, Dala | ≤ 5 | ≥ 60 | 6% |
-| Collection effectiveness index (CEI), T3M | Invoices, payments | Pesa, Dala | ≥ 90% | ≤ 50% | 6% |
-| Aging drift: 3-month change in the receivables severe overdue ratio | AR aging with `as_of_date` | Pesa, Dala | ≤ 0 pts | ≥ +20 pts | 4% |
-| Cash runway: bank balances ÷ average monthly outflow | Cash-flow report | Pesa | ≥ 3 months | ≤ 0.5 months | 10% |
-| Customers over credit limit | `credit_limit`, `current_balance` | Duka, Pesa | ≤ 5% | ≥ 30% | 3% |
-| Rent collection rate, T3M | Rent invoices, rent payments | Dala | ≥ 95% | ≤ 60% | 7% |
-| Payment-plan collection: installments paid ÷ installments due | Payment plans, sale payments | Dala | ≥ 95% | ≤ 60% | 3% |
-| Gift card liability: unredeemed balance ÷ monthly revenue | Gift cards | Duka | ≤ 5% | ≥ 50% | 2% |
-| Severe overdue ratio (payables): bills 60+ days past due ÷ total open bills | AP aging, bills | Pesa | ≤ 5% | ≥ 40% | 7% ◆ |
-| Bills paid on time: bills paid by `due_date` ÷ bills due, T6M | Bills (`due_date`, `paid_date`) | Pesa | ≥ 90% | ≤ 40% | 7% ◆ |
-| DPO ÷ agreed supplier terms | Bills, `Supplier.payment_terms` | Pesa, Duka | ≤ 1.1× | ≥ 2.5× | 4% ◆ |
-
-**Cash businesses:** if credit sales are under 5% of revenue, the receivables measures don't apply. **Businesses without supplier bills:** the payables measures don't apply. Neither case is penalized.
-
-### 3.3 Profitability and cost control · 13%
-
-| Measure | Data points | Sources | Good | Poor | Weight |
-|---|---|---|---|---|---|
-| Gross margin: (revenue − cost of goods sold) ÷ revenue | Best available cost, in order: actual purchase cost of supplier-tracked stock (PO and bill unit prices); P&L; sold quantity × `supplier_price` (only if ≥ 80% of items sold have a cost price); recipes for restaurants | Pesa, Duka | ≥ 35% | ≤ 5% | 24% |
-| Net margin: (revenue − expenses) ÷ revenue | P&L | Pesa | ≥ 10% | ≤ −10% | 23% |
-| Staff cost ÷ revenue | Payroll `total_gross`; wages | Bandu, Duka | ≤ 25% | ≥ 60% | 14% |
-| Cost discipline: expense growth − revenue growth, T3M vs P3M | Expenses | Pesa | ≤ 0 pts | ≥ +25 pts | 9% |
-| Revenue per staff member, monthly | Revenue ÷ staff (`staff_count`, active employees) | Duka, Bandu | ≥ sector 75th pct | ≤ sector 10th pct | 9% |
-| Maintenance cost ÷ rent income | Maintenance tickets and costs, rent | Dala | ≤ 5% | ≥ 25% | 9% |
-| Commission cost ÷ property sales | Commissions, sales | Dala | ≤ 3% | ≥ 10% | 4% |
-| Purchase-to-sales alignment: purchases of supplier-tracked stock ÷ cost of that stock sold, T3M | POs, bills, order items of supplier-tracked products | Duka, Pesa | 0.8–1.2× | ≤ 0.3× or ≥ 2.5× | 8% ◆ |
-
-Revenue per staff member uses sector percentiles from the start, since it varies too much by business type for fixed thresholds.
-
-### 3.4 Customer and revenue base · 13%
-
-| Measure | Data points | Sources | Good | Poor | Weight |
-|---|---|---|---|---|---|
-| Top customer's share of T12M revenue | Identified customers; tenants | Duka, Pesa, Dala | ≤ 15% | ≥ 60% | 16% |
-| Customer retention: share of P3M customers who bought again in T3M | Customers, orders; lease renewals | Duka, Pesa, Dala | ≥ 70% | ≤ 20% | 16% |
-| Active-customer trend: T3M vs P3M | Customers, orders | Duka, Pesa, Dala | ≥ +5% | ≤ −30% | 10% |
-| Revenue concentration (HHI across customers) | Customers, orders | Duka, Pesa, Dala | ≤ 0.10 | ≥ 0.40 | 7% |
-| Transaction breadth: largest single sale's share of T12M revenue | Orders, invoices | Duka, Pesa | ≤ 5% | ≥ 40% | 10% |
-| Product concentration: top product's share of revenue | Best sellers, order items | Duka | ≤ 20% | ≥ 70% | 8% |
-| New customers per month, T3M vs P3M | Customer `createdAt` | Duka, Mteja | ≥ 0% | ≤ −50% | 8% |
-| Customer visit trend: T3M vs P3M | Customer visits | Duka, Mteja | ≥ 0% | ≤ −30% | 6% |
-| Customer satisfaction: average feedback rating | Customer feedback | Duka | ≥ 4.3 / 5 | ≤ 3.0 / 5 | 7% |
-| Loyalty engagement: revenue from loyalty, gift card and subscription customers ÷ revenue | Loyalty points, gift cards, subscriptions | Duka | ≥ 20% | 0% | 5% |
-| At-risk revenue: share of revenue from `at_risk` or `churned` customers | Lifecycle stages | Mteja | ≤ 5% | ≥ 30% | 7% |
-
-**Walk-in businesses:** if identified customers account for under 20% of revenue, the customer-level measures don't apply. The dimension then rests on transaction breadth, product concentration and the transaction trend.
-
-### 3.5 Operational stability · 18%
-
-| Measure | Data points | Sources | Good | Poor | Weight |
-|---|---|---|---|---|---|
-| Business tenure: months since the first transaction or `Tenant.createdAt` | Tenant, orders | Any | ≥ 36 | ≤ 6 | 8% |
-| Staff count trend: now vs 6 months ago | `Shop.staff_count`; active employees | Duka, Bandu | ≥ 0% | ≤ −40% | 6% |
-| Staff turnover: exits ÷ average headcount, T12M | Employees (`employment_status`, dates) | Bandu | ≤ 15% | ≥ 60% | 6% |
-| Payroll regularity: months with completed payroll in T6M ÷ 6 | Payroll; wages | Bandu, Duka | 100% | ≤ 50% | 8% |
-| Shift regularity: trading days with an opened shift ÷ trading days | Shifts | Duka | ≥ 90% | ≤ 40% | 5% |
-| Key-person dependence: top staff member's share of sales | `served_by`, top earners | Duka | ≤ 40% | ≥ 90% | 5% |
-| Stock-out rate: selling items below `min_viable_quantity` | Inventory | Duka | ≤ 5% | ≥ 30% | 6% |
-| Inventory turnover: COGS T12M ÷ average inventory value at cost | Inventory, cost prices | Duka | ≥ 6× | ≤ 1× | 6% |
-| Dead stock: value of items unsold in 90 days ÷ inventory value | Inventory, order items | Duka | ≤ 10% | ≥ 50% | 3% |
-| Catalogue activity: share of active products sold in T3M | Products, services, order items | Duka | ≥ 60% | ≤ 15% | 3% |
-| Capacity utilization: orders per table per trading day (restaurants); room nights ÷ available rooms (hotels) | Tables, orders; hotel bookings | Duka | ≥ sector 75th pct | ≤ sector 10th pct | 3% |
-| Occupancy: occupied units ÷ total units | Units | Dala | ≥ 90% | ≤ 50% | 6% |
-| Maintenance backlog: open tickets older than 30 days ÷ open tickets | Maintenance tickets | Dala | ≤ 10% | ≥ 50% | 3% |
-| Shop network (2+ shops only): see §3.7 | Shops, orders | Duka | ≥ 75 | ≤ 40 | 8% |
-| Unplanned leave: unplanned leave days ÷ working days | Leave | Bandu | ≤ 2% | ≥ 10% | 2% |
-| Asset base trend: net book value now vs 12 months ago | Assets | Pesa | ≥ 0% | ≤ −30% | 2% |
-| Supplier concentration: top supplier's share of purchases, T12M | Purchase orders, bills | Duka, Pesa | ≤ 30% | ≥ 80% | 5% ◆ |
-| Delivery fill rate: quantity received ÷ quantity ordered on purchase orders, T6M | Purchase orders (`delivery_percentage`, status), deliveries | Duka | ≥ 95% | ≤ 60% | 4% ◆ |
-| Procurement regularity: months with purchases in T6M ÷ 6 | Purchase orders, bills | Duka, Pesa | 100% | ≤ 33% | 2% ◆ |
-| Sell-through of supplier-tracked stock: units sold ÷ units received, per supplier, weighted by purchase value, T6M | Deliveries, order items of supplier-tracked products | Duka | ≥ 80% | ≤ 30% | 5% ◆ |
-| Stock cover of supplier-tracked stock: days of sales the stock on hand covers | Inventory, order items | Duka | 14–60 days | ≤ 3 or ≥ 180 days | 4% ◆ |
-
-Supplier measures (◆) apply only when the business records suppliers and purchases; sell-through and stock cover also need inventory tracked to suppliers. Their weights scale with tracking completeness (§3.9).
-
-### 3.6 Formality and compliance · 12%
-
-| Measure | Data points | Sources | Good | Poor | Weight |
-|---|---|---|---|---|---|
-| Digital payment share: M-Pesa, card and Pesapal ÷ all payments | Payment methods, order payments, receipt `payment_method` | Duka, Pesa | ≥ 70% | ≤ 10% | 18% |
-| Tax registration and eTIMS: VAT enabled; share of invoices verified with KRA eTIMS | `is_vat_enabled`, eTIMS/DigiTax status | Duka, Pesa | eTIMS on, ≥ 90% verified | neither | 15% |
-| Receipting: share of sales with a receipt issued | `receiptNumber`, sales receipts, printed documents | Duka, Pesa | ≥ 95% | ≤ 50% | 8% |
-| Bookkeeping regularity: months with posted journal entries in T6M ÷ 6 | Journal entries | Pesa | 100% | ≤ 33% | 11% |
-| Bank reconciliation recency: days since the last completed reconciliation | Bank reconciliations | Pesa | ≤ 35 | ≥ 120 | 7% |
-| Statutory payroll compliance: payroll runs with statutory deductions processed; P9 forms generated | Deductions, P9 forms | Bandu | 100% | ≤ 50% | 8% |
-| Platform standing: BASEPOINT subscription active and paid on time | `subscription_status`, `next_billing_date` | Any | Active, current | Lapsed | 8% |
-| **Ecosystem depth:** BASE products actively used (with activity in T3M) | Activity per product | Any | 4+ products = 100; 3 = 80; 2 = 60 | 1 product = 40 | 15% |
-| Supply-chain traceability index (§3.9): inventory value weighted by supplier tracking tier | Suppliers, POs, deliveries, bills, inventory, order items | Duka, Pesa | ≥ 80 | ≤ 10 | 10% ◆ |
-
-**Ecosystem depth gives a slight, capped advantage for using more BASE products.** A business running more of its operations on BASE is more transparent and its data is more verifiable. The advantage is deliberately small. Formality is 12% of the score, and even a single-product business scores 40 on this measure. So using all products instead of one adds at most about **2 points** to the overall score. Only products with actual activity in the last 3 months count, not products merely enabled.
-
-The traceability index applies only when the business tracks inventory. Unlike ecosystem depth, it rewards how completely the business records its supply chain, whichever products it uses.
-
-### 3.7 Shop network measure (2+ shops)
-
-A single measure inside Operational stability, not a dimension of its own, so having several shops doesn't add weight. It is the average of four sub-scores:
-
-| Sub-measure | Good | Poor |
+| Dimension | What it looks at (example measures) | Weight |
 |---|---|---|
-| Share of revenue from shops scoring below 50 | ≤ 10% | ≥ 50% |
-| Top shop's share of T12M revenue | ≤ 40% | ≥ 85% |
-| Share of established shops with declining revenue (T3M vs P3M ≤ −10%) | ≤ 20% | ≥ 60% |
-| Dormant shops: established shops with no sales in the last 30 days | 0% | ≥ 40% |
+| 1. Sales performance | Sales per day, growth, how steady sales are month to month | 20% |
+| 2. Cash, collections and payables | Share of sales actually paid, overdue invoices, cash in the bank, paying suppliers on time | 25% |
+| 3. Profitability and cost control | Gross and net margin, staff cost as a share of sales | 15% |
+| 4. Customer and revenue base | Dependence on the biggest customer, repeat customers | 12% |
+| 5. Operational stability | Age of the business, staff turnover, stock-outs, shop performance | 18% |
+| 6. Formality and compliance | eTIMS and VAT, receipts, bookkeeping, statutory payroll, digital payments | 10% |
+| **Total** | | **100%** |
 
-A shop's first 3 months are its **ramp-up**. Ramp-up shops count towards revenue and balances, but are excluded from growth, trend, retention and shop-network comparisons. Stock transfers between shops (`Transfer`) are internal movements, not sales.
+### 1.2 How each number is justified
 
-### 3.8 Data points not weighted
+No single study gives the right weight for a small Kenyan business's cash runway. So we use a ladder of evidence and say, for every number, which rung it stands on.
 
-These are configuration or presentation settings, not business behaviour, so they carry no weight: printers and print settings, units of measure, modifiers and add-ons, colour schemes and branding, tips settings, hotel settings, gallery, FAQs, roles and permissions, notifications, document templates and signing, Biashara AI. If any of them turns out to carry signal, it can be given a weight like any other data point.
+**Table 2: The evidence ladder**
 
-WhatsApp/omnichannel responsiveness (`Customer.unreplied_texts`, `conversation_count`) is a candidate measure for the customer dimension, once we know how widely it's used.
+| Tag | Basis | What it means and examples |
+|---|---|---|
+| S | Standard or regulation | A rule set by a regulator or standard setter. Examples: 90 days past due as default (Basel, IFRS 9, CBK); eTIMS invoicing (Finance Act 2023); the 10% major-customer rule (ASC 280). |
+| E | Empirical evidence | A published study or official statistic. Examples: median cash buffer of 27 days (JPMorgan Chase Institute, 2016); why Kenyan small firms close (KNBS, 2016); business survival rates (BLS, 2024). |
+| B | Industry benchmark | A rule of thumb widely used in a sector. Examples: restaurant labour at 25–35% of sales; collection effectiveness of 80% or more. |
+| C | Convention | A value we set because no external source exists. It is a placeholder. It should be checked against data as more businesses are scored. |
 
-### 3.9 Supplier-tracked data: tiers and heavier weights
+## 2 How the score is built
 
-Each supplier relationship is placed in a **tracking tier**, according to how much of the chain from purchase to sale the business records:
+### 2.1 Five steps from data to score
 
-| Tier | What's recorded for the supplier | Index points |
+1. **Score each measure from 0 to 100.** At or better than the Good threshold scores 100. At or worse than Poor scores 0. In between, the score rises in a straight line. For "lower is better" measures, such as days sales outstanding, the line runs the other way.
+2. **Average measures into a dimension score.** Use the measure weights. If some measures have no data, the weights of the ones that do are scaled back up to 100%.
+3. **Apply the credibility rule.** If the measures with data carry less than half of a dimension's weight, pull the dimension score toward the peer median (Section 2.2).
+4. **Average the six dimensions** at their fixed weights (Table 4).
+5. **Apply red-flag caps,** then assign the band and confidence (Section 5).
+
+### 2.2 Missing data
+
+**Within a dimension.** A measure with no data is skipped. The other measures' weights are scaled up. The dimension's own weight never changes.
+
+**Credibility rule.** Scaling up has a weak point. A dimension can end up resting on one measure. For example, a Duka-only business may have no ledger, so profitability can rest on revenue per staff member alone, a measure that carries under 10% of the dimension's weight. The dimension score is therefore blended with the peer median:
+
+```
+dimension score = c × measured score + (1 − c) × peer median
+c = min(1, weight of measures with data ÷ 50%)
+```
+
+This is the logic of credibility weighting in insurance pricing (Bühlmann, 1967). The less evidence there is, the closer the estimate stays to the group average. The 50% point is a convention (C). A dimension with half its weight measured counts in full.
+
+**A whole dimension missing.** It is filled with the peer median for that dimension and flagged as imputed. Peers are businesses of the same business type, or all businesses until there are enough. Until enough businesses are scored, the engine uses 50. Imputation lowers confidence.
+
+**Minimum to publish.** At least 3 months of activity in a sales product (Duka, Pesa or Dala), and at most one imputed dimension. Otherwise the result is "Insufficient data". If a sales endpoint fails, the result is "Data unavailable", never "Insufficient data".
+
+### 2.3 Time windows
+
+The reference date is normally today. The score is also computed at each month-end, so a trend can be shown.
+
+**Table 3: Time windows and receivable aging**
+
+| Term | Meaning |
+|---|---|
+| T3M, P3M | Trailing 3 months; the 3 months before that. Used for short-term trends. |
+| T12M | Trailing 12 months. Used for levels, concentration and volatility. |
+| Aging buckets | Not yet due; 1–30; 31–60; 61–90; 91–120; 121+ days past due. Same buckets as Pesa's receivables aging report. |
+| Open invoice at date d | Issued on or before d and not fully paid by d. Amount open = total minus payments dated on or before d. |
+
+## 3 Dimension weights
+
+Dimension weights are fixed. They do not change with the products a business uses.
+
+**Table 4: Dimension weights and justification**
+
+| Dimension | Weight (%) | Basis | Why |
+|---|---|---|---|
+| Sales performance | 20 | E | Revenue level and trend are core inputs in cash-flow underwriting (FinRegLab, 2019). It sits below cash because several sales measures are noisy over 3 months and overlap with cash. |
+| Cash, collections and payables | 25 | E | Largest single risk. 30% of closed Kenyan small firms cite a shortage of operating funds (KNBS, 2016). Half of small firms hold under 27 days of cash (JPMorgan Chase Institute, 2016). Liquidity is a leading predictor of small-firm default (Altman and Sabato, 2007). |
+| Profitability and cost control | 15 | E | Profitability is among the strongest predictors of small-firm failure (Altman, 1968; Altman and Sabato, 2007). The credibility rule (Section 2.2) guards against thin ledger data. |
+| Customer and revenue base | 12 | C | Concentration and retention matter, but most point-of-sale businesses record few named customers. The dimension often rests on few measures. |
+| Operational stability | 18 | E | Business age is one of the strongest survival predictors (BLS, 2024; KNBS, 2016). Staff and stock stability carry the rest. |
+| Formality and compliance | 10 | E | Formal firms are more productive and better at accessing credit (La Porta and Shleifer, 2014). The weight inside the dimension sits mainly on legal duties: tax, receipts, books and statutory payroll. |
+| **Total** | **100** | | |
+
+## 4 Measures, thresholds and weights
+
+Every behavioural data point in BASEPOINT feeds one measure. Each measure sits in one dimension and has a weight inside it. A business gets whichever measures its products allow. Exact definitions and source products are in Appendix A.
+
+Reading the tables: Good scores 100 and Poor scores 0. Basis: S standard or regulation, E empirical evidence, B industry benchmark, C convention. ♦ marks a supplier measure. It applies only when the business records suppliers and purchases (Section 4.7).
+
+### 4.1 Sales performance (20%)
+
+Revenue is the union of completed point-of-sale orders, accounting invoices not linked to an order, sales receipts not linked to an invoice, and rent invoices and property sale payments. Invoices created automatically from orders are the same sales and are not counted twice.
+
+**Table 5: Sales performance**
+
+| Measure | Good | Poor | Weight (%) | Basis | Why |
+|---|---|---|---|---|---|
+| Daily transaction volume | ≥ 50 | ≤ 2 | 8 | C | It measures scale, not health, and overlaps with daily value. Moves to sector percentiles at 30+ firms per type. |
+| Daily transaction value (KES) | ≥ 50k | ≤ 1k | 10 | C | Scale measure. Interim values; sector percentiles replace them. |
+| Revenue growth, T3M vs P3M | ≥ +5% | ≤ −25% | 10 | S | +5% a quarter compounds to about 22% a year. A 25% fall is the "substantial decline" test used for small-firm relief (SBA, 2021). Quarterly figures are noisy and seasonal, so the weight is moderate. |
+| Year-on-year growth (15+ months) | ≥ +10% | ≤ −25% | 12 | S | Removes seasonality, so it gets more weight than the quarterly comparison. Same decline test. |
+| Revenue volatility (CV, T12M) | ≤ 0.15 | ≥ 0.60 | 12 | C | No external standard. Use seasonally adjusted series once 24 months exist. |
+| Trading continuity (months with sales) | 12 | ≤ 6 | 8 | C | Continuous trading is the most basic sign of survival. |
+| Trading days share, T3M | ≥ 85% | ≤ 30% | 6 | C | 85% equals trading 6 days a week; 30% about 2 days a week. |
+| Transaction count trend | ≥ +5% | ≤ −25% | 6 | S | Aligned with the revenue decline test. |
+| Average transaction value trend | ≥ 0% | ≤ −25% | 4 | C | A falling average sale suggests customers are spending less per visit. |
+| Revenue leakage (discounts, voids) | ≤ 3% | ≥ 20% | 7 | C | Discounts and voids cut the revenue a business keeps. Good allows 3% because some discounting is deliberate pricing. |
+| Refunds and credit notes | ≤ 1% | ≥ 10% | 4 | C | Frequent refunds reverse earned revenue and point to quality or service problems. |
+| Recurring revenue share | ≥ 30% | 0% | 5 | C | Contracted repeat income makes revenue more predictable. Only where subscriptions, packages or leases are offered. |
+| Forward bookings ratio | ≥ 1.0× | ≤ 0.5× | 3 | C | 1.0× means bookings hold steady. |
+| Sales target attainment | ≥ 100% | ≤ 60% | 3 | C | 100% is the target by definition. |
+| Lead conversion rate, T6M | ≥ 25% | ≤ 5% | 2 | C | Varies widely by sector. Calibrate. |
+| **Total** | | | **100** | | |
+
+CV = coefficient of variation of monthly revenue (standard deviation divided by mean). The growth decline thresholds mirror the US Paycheck Protection Program second-draw test of a 25% fall in gross receipts. The red-flag cap (Table 13) uses the stricter 50% fall test.
+
+### 4.2 Cash, collections and payables (25%)
+
+**Cash businesses:** if credit sales are under 5% of revenue, the receivables measures do not apply. **Businesses without supplier bills:** the payables measures do not apply. Neither case is penalized.
+
+**Table 6: Cash, collections and payables**
+
+| Measure | Good | Poor | Weight (%) | Basis | Why |
+|---|---|---|---|---|---|
+| Cash realization (cash received ÷ revenue) | ≥ 95% | ≤ 60% | 19 | E | Cash received is the core of cash-flow underwriting (FinRegLab, 2019), so it carries the largest weight. |
+| Severe overdue receivables: share of open receivables 90+ days past due | ≤ 5% | ≥ 40% | 11 | S | Overdue means 90+ days past due, the default definition in Basel, IFRS 9 and CBK guidelines. The share thresholds are a convention (C). |
+| Days sales outstanding (DSO) | ≤ 45 | ≥ 90 | 9 | B | 30-day terms plus 15 days' grace, the edge of "pays on time" in trade credit scores (Dun & Bradstreet). 90 days is default. It overlaps with the two aging measures, so the weight is moderate. |
+| Weighted average days past due | ≤ 5 | ≥ 30 | 6 | S | 30 days past due signals a significant rise in credit risk under IFRS 9. |
+| Collection effectiveness index (CEI) | ≥ 80% | ≤ 50% | 6 | B | 80% or more is the usual benchmark for good collection (Versapay). |
+| Aging drift (3-month change) | ≤ 0 pt | ≥ +20 pt | 4 | C | A rising overdue share is an early warning before debts reach default. |
+| Cash runway (months) | ≥ 2 | ≤ 0.5 | 12 | E | The median small firm holds 27 days of cash; a quarter hold under 13 (JPMorgan Chase Institute, 2016). 2 months is about twice the median; 0.5 is the bottom quartile. |
+| Customers over credit limit | ≤ 5% | ≥ 30% | 3 | C | Customers above their limit show that credit control is slipping. |
+| Rent collection rate, T3M | ≥ 95% | ≤ 60% | 7 | B | Matches the cash realization standard. |
+| Payment-plan collection | ≥ 95% | ≤ 60% | 3 | B | Matches the cash realization standard. |
+| Gift-card liability ÷ monthly revenue | ≤ 5% | ≥ 50% | 2 | C | Unredeemed gift cards are a debt to customers, owed in future goods or service time. |
+| Severe overdue payables: share of open bills 90+ days past due ♦ | ≤ 5% | ≥ 40% | 7 | S | Same 90-day default line as receivables, for consistency. The share thresholds are a convention (C). |
+| Bills paid on time, T6M ♦ | ≥ 90% | ≤ 40% | 7 | B | "Pays within terms" is the low-risk band in trade credit scores (Dun & Bradstreet). |
+| DPO ÷ agreed supplier terms ♦ | ≤ 1.1× | ≥ 2.5× | 4 | B | Days beyond terms is the standard trade-credit yardstick (Dun & Bradstreet). |
+| **Total** | | | **100** | | |
+
+Default definitions: Basel framework CRE36.69; IFRS 9 paragraphs 5.5.11 (30 days) and B5.5.37 (90 days); CBK Prudential Guideline on risk classification of assets (watch 31–90 days, substandard 91–180 days). DPO = days payables outstanding. Customer and supplier payment terms come from `Customer.payment_terms` and `Supplier.payment_terms`.
+
+### 4.3 Profitability and cost control (15%)
+
+Ledger measures (gross margin from the profit and loss, net margin, cash runway) are used only when ledger revenue covers at least 80% of the sales seen in transactions. Without this guard, incomplete books produce absurd values.
+
+**Table 7: Profitability and cost control**
+
+| Measure | Good | Poor | Weight (%) | Basis | Why |
+|---|---|---|---|---|---|
+| Gross margin | By sector | By sector | 24 | B | One threshold cannot fit all. Restaurants run food cost at 25–35% of sales, so their margins sit far above a retailer's (Complete Controller, 2025). |
+| Net margin | ≥ 10% | ≤ −10% | 23 | B | Typical restaurants earn 3–5%; well-run ones 10% or more. Break-even scores 50. |
+| Staff cost ÷ revenue | ≤ 30% | ≥ 50% | 17 | B | Restaurant labour runs 25–35% of sales; salon and spa payroll 30–35%. Above 50% leaves little for goods and rent. |
+| Cost discipline (expense vs revenue growth) | ≤ 0 pt | ≥ +25 pt | 9 | C | Costs that grow faster than revenue squeeze margins over time. |
+| Revenue per staff member | 75th pct | 10th pct | 6 | C | A productivity measure, not profit. Should not score until sector data exist. |
+| Maintenance cost ÷ rent income | ≤ 5% | ≥ 25% | 9 | C | High upkeep relative to rent erodes a property's net income. |
+| Commission cost ÷ property sales | ≤ 3% | ≥ 10% | 4 | C | Commissions above usual agent rates cut the margin on each sale. Confirm against local agent rates. |
+| Purchase-to-sales alignment ♦ | 0.8–1.2× | < 0.3 or > 2.5× | 8 | C | Buying roughly what is sold avoids both overstocking and running stock down. |
+| **Total** | | | **100** | | |
+
+Interim gross margin thresholds until sector percentiles exist (Good / Poor): food service ≥ 60% / ≤ 40%; retail and wholesale ≥ 25% / ≤ 5%; personal and professional services ≥ 50% / ≤ 20%; other ≥ 35% / ≤ 5%. Business type comes from the tenant record, not the shop's point-of-sale mode.
+
+### 4.4 Customer and revenue base (12%)
+
+**Walk-in businesses:** if named customers account for under 20% of revenue, the customer-level measures do not apply. The dimension then rests on transaction breadth, product concentration and transaction trends.
+
+**Table 8: Customer and revenue base**
+
+| Measure | Good | Poor | Weight (%) | Basis | Why |
+|---|---|---|---|---|---|
+| Top customer's share of revenue | ≤ 10% | ≥ 50% | 16 | S | 10% is the "major customer" line in financial reporting (FASB, ASC 280). Half of revenue from one customer is a severe dependence. |
+| Customer retention, T3M | ≥ 70% | ≤ 20% | 18 | E | Small gains in retention raise profits sharply (Reichheld and Sasser, 1990). Thresholds vary by sector; calibrate. |
+| Active-customer trend | ≥ +5% | ≤ −25% | 10 | S | Aligned with the revenue decline test. |
+| Revenue concentration (HHI) | ≤ 0.10 | ≥ 0.25 | 5 | S | Competition authorities treat 0.18 as "highly concentrated" (0.25 before 2023) (DOJ and FTC, 2023). It largely repeats top-customer share, so its weight is small. |
+| Transaction breadth (largest sale's share) | ≤ 5% | ≥ 40% | 10 | C | Revenue that rests on one large sale is less dependable than many smaller ones. |
+| Product concentration (top product) | ≤ 20% | ≥ 70% | 8 | C | Relying on one product leaves the business exposed if demand or supply for it falls. |
+| New customers per month, trend | ≥ 0% | ≤ −50% | 8 | C | A steady inflow of new customers replaces those who leave. |
+| Customer visit trend | ≥ 0% | ≤ −30% | 6 | C | Falling visits usually come before falling sales. |
+| Customer satisfaction (1–5) | ≥ 4.3 | ≤ 3.0 | 7 | C | Satisfied customers are more likely to return. 3.0 is the neutral mid-point of the scale. |
+| Loyalty engagement share | ≥ 20% | 0% | 5 | C | Customers in loyalty, gift-card or subscription schemes are more likely to come back. |
+| At-risk revenue share | ≤ 5% | ≥ 30% | 7 | C | Revenue from customers who are already drifting away is likely to be lost. |
+| **Total** | | | **100** | | |
+
+HHI = Herfindahl–Hirschman index, the sum of squared revenue shares across customers (0 to 1). We use 0.25 as Poor so a score of zero means clearly concentrated. The red flag for single-customer dependence is set at 70% (Table 13).
+
+### 4.5 Operational stability (18%)
+
+**Table 9: Operational stability**
+
+| Measure | Good | Poor | Weight (%) | Basis | Why |
+|---|---|---|---|---|---|
+| Business tenure (months) | ≥ 48 | ≤ 12 | 10 | E | Kenyan small firms close at 3.8 years on average; 61% of closures are firms under 2 years old (KNBS, 2016). One US firm in five fails in year 1 (BLS, 2024). |
+| Staff count trend (6 months) | ≥ 0% | ≤ −40% | 6 | C | A shrinking team often signals that the business is cutting back. |
+| Staff turnover, T12M | ≤ 30% | ≥ 80% | 6 | E | Hospitality loses about 5% of staff a month, over 60% a year (BLS, 2025). Sector percentiles later. |
+| Payroll regularity, T6M | 100% | ≤ 50% | 8 | S | Payroll taxes are due monthly, by the 9th of the next month. |
+| Shift regularity | ≥ 90% | ≤ 40% | 5 | C | Opening a shift on each trading day shows the business runs to a routine. Not yet measurable from the API. |
+| Key-person dependence | ≤ 40% | ≥ 90% | 5 | C | A business where one person makes most sales is at risk if that person leaves. |
+| Stock-out rate | ≤ 5% | ≥ 20% | 6 | E | Retail stock-outs average about 8% worldwide (Gruen et al., 2002). The average firm should score above half. |
+| Inventory turnover (× per year) | By sector | By sector | 6 | B | Perishable stock turns far faster than durable goods. Sector percentiles apply; non-food retail uses 6 (Good) and 1 (Poor). |
+| Dead stock (unsold 90 days) | ≤ 10% | ≥ 50% | 3 | C | Stock unsold for 90 days ties up cash and may never sell. |
+| Catalogue activity | ≥ 60% | ≤ 15% | 3 | C | A catalogue full of items that never sell points to weak range and stock control. |
+| Capacity utilization | 75th pct | 10th pct | 3 | C | Use of tables or rooms differs by type of venue, so it is sector-relative from the start. |
+| Occupancy (units) | ≥ 90% | ≤ 50% | 6 | B | 5–10% vacancy is a normal letting margin. |
+| Maintenance backlog | ≤ 10% | ≥ 50% | 3 | C | Repair tickets left open for over a month point to weak property management. |
+| Shop network (2+ shops) | ≥ 75 | ≤ 40 | 6 | C | It partly repeats sales trends, so its weight is moderate. Sub-measures in Table 10. |
+| Unplanned leave | ≤ 2% | ≥ 10% | 2 | C | High unplanned absence disrupts service and can signal low morale. |
+| Asset base trend | ≥ 0% | ≤ −30% | 2 | C | A shrinking asset base can mean assets are sold to cover costs. Not yet measurable from the API. |
+| Supplier concentration ♦ | ≤ 30% | ≥ 80% | 5 | C | Depending on one supplier leaves the business exposed if that supplier fails. |
+| Delivery fill rate ♦ | ≥ 95% | ≤ 60% | 4 | B | 95% is a common supply-chain service target. |
+| Procurement regularity ♦ | 100% | ≤ 33% | 2 | C | Buying every month shows steady restocking. |
+| Sell-through of tracked stock ♦ | ≥ 80% | ≤ 30% | 5 | B | Common retail sell-through target. |
+| Stock cover of tracked stock (days) ♦ | 14–60 | < 3 or > 180 | 4 | C | Too little stock risks stock-outs, and too much ties up cash. |
+| **Total** | | | **100** | | |
+
+Tenure is counted from the first transaction or tenant creation date. It understates age for firms that joined BASEPOINT late. Use a self-reported founding date when one is captured. Kenyan statutory payroll (PAYE, NSSF, SHIF, Housing Levy) is remitted monthly.
+
+**Shop network sub-measures.** For businesses with two or more shops, one measure in this dimension. It is the average of four sub-scores.
+
+**Table 10: Shop network sub-measures**
+
+| Sub-measure | Good | Poor | Basis | Why |
+|---|---|---|---|---|
+| Revenue share from shops scoring under 50 | ≤ 10% | ≥ 50% | C | Weak shops that carry much of the revenue drag on the whole business. |
+| Top shop's share of T12M revenue | ≤ 50% | ≥ 90% | C | A flagship plus smaller branches is a normal structure. |
+| Established shops declining (≤ −10%) | ≤ 20% | ≥ 60% | C | Several established shops shrinking at once points to a business-wide problem. |
+| Dormant established shops (no sales 30 days) | 0% | ≥ 40% | C | A shop with no sales for 30 days is likely closed or failing. |
+
+A shop's first 3 months are its ramp-up. Ramp-up shops count toward revenue and balances, but not toward growth, trend, retention or network comparisons.
+
+### 4.6 Formality and compliance (10%)
+
+**Table 11: Formality and compliance**
+
+| Measure | Good | Poor | Weight (%) | Basis | Why |
+|---|---|---|---|---|---|
+| Digital payment share | ≥ 70% | ≤ 10% | 20 | C | Digital payments leave a verifiable trail. Thresholds are ours; check against FinAccess data. |
+| Tax registration and eTIMS | eTIMS, ≥ 90% | neither | 20 | S | Since January 2024, expenses without an eTIMS invoice are not tax-deductible (Finance Act, 2023). VAT registration is compulsory above KES 5 million turnover. |
+| Receipting (sales with a receipt) | ≥ 95% | ≤ 50% | 10 | S | The law expects a tax invoice for every sale by a registered business. |
+| Bookkeeping regularity, T6M | 100% | ≤ 33% | 14 | S | Records must be kept for 5 years (Tax Procedures Act, 2015). VAT and turnover tax returns are monthly. |
+| Bank reconciliation recency (days) | ≤ 35 | ≥ 90 | 9 | B | Monthly reconciliation is standard month-end practice. 90 days means a full quarter missed. |
+| Statutory payroll compliance | 100% | ≤ 50% | 12 | S | PAYE, NSSF, SHIF and Housing Levy are legal duties, remitted monthly. |
+| Platform standing (subscription paid) | Active | Lapsed | 5 | C | Reflects the relationship with BASEPOINT more than the firm's health, so its weight is small. |
+| Supply-chain traceability index ♦ | ≥ 80 | ≤ 10 | 10 | C | Tracing goods from supplier to sale shows the stock records can be trusted. Applies only above a minimum purchase base (Section 4.7). |
+| **Total** | | | **100** | | |
+
+The tax registration measure scores 100 for eTIMS active with ≥ 90% of invoices verified, and 0 when neither VAT nor eTIMS is set up. Small firms on turnover tax (KES 1–25 million) may face a simpler record-keeping route under KRA guidance; score them on records kept, not on eTIMS alone.
+
+### 4.7 Supplier-tracked data
+
+Each supplier relationship is placed in a tracking tier. The tier says how much of the chain from purchase to sale the business records.
+
+**Table 12: Supplier tracking tiers**
+
+| Tier | What is recorded for the supplier | Index points |
 |---|---|---|
 | 0 | Nothing, or supplier name only | 0 |
 | 1 | Purchases: purchase orders or bills | 40 |
-| 2 | Purchases **and** inventory tracked to the supplier (`ProductInventory.supplier_id`) | 75 |
-| 3 | The full chain: purchase order → delivery → bill → payment, **and** sales of that supplier's items (orders, invoices, receipts) | 100 |
+| 2 | Purchases and inventory linked to the supplier | 75 |
+| 3 | Full chain: order, delivery, bill, payment, and sales of the supplier's items | 100 |
 
-**Traceability index** = Σ over inventory value (or purchase value where there's no inventory) of each supplier's share × its tier points. A business whose stock mostly comes from tier-3 suppliers scores near 100.
+- **Traceability index** = inventory value (or purchase value) share of each supplier × its tier points, summed.
+- **Tracking factor** on each ♦ measure's weight = 0.75 + 0.5 × share of purchases from tier 2–3 suppliers (0.75× to 1.25×).
+- **Minimum to apply:** 3 purchase documents and T12M purchases ≥ 5% of T12M revenue.
 
-**Heavier weights for better-tracked supplier data.** Every supplier measure (◆) has its base weight multiplied by a tracking factor before the dimension's weights are re-normalized:
+**Why tracked data weighs more.** Tracked data are computed from verified transactions (actual costs, received quantities, units sold), not estimates. Giving more weight to more precise evidence is the logic of inverse-variance weighting. The 0.75–1.25 range is a convention (C).
 
-> tracking factor = 0.75 + 0.5 × (share of purchase value from tier 2–3 suppliers)
+**Why a minimum base.** Service businesses (spas, salons, consultancies) buy few goods. A handful of small purchases says nothing about their supply chain, yet can produce a traceability score of 0. The 5% floor is a convention (C). Payables measures still apply to any bill, since an overdue bill is a real debt.
 
-So supplier measures weigh 0.75× their base when nothing is tracked to inventory, 1.0× at half, and **1.25×** when all purchases come from tier 2–3 suppliers. The dimension weights (§2) never change; only the supplier measures' share *within* a dimension grows. Well-tracked supplier data therefore counts slightly more than other evidence in the same dimension.
+**Data points not weighted.** Configuration and presentation settings carry no weight: printers and print settings, units of measure, modifiers and add-ons, colours and branding, tip settings, hotel settings, gallery, FAQs, roles and permissions, notifications, document templates and signing, and Biashara AI. WhatsApp responsiveness is a candidate customer measure once usage is known.
 
-**Why tracking earns weight:** when a supplier's goods can be followed from purchase to sale, the measures are computed from verified transactions (actual purchase costs, received quantities, units sold) rather than estimates. It also makes the stock usable as a basis for inventory-backed financing.
+## 5 Red flags, bands and benchmarks
 
-**In the demo account:** 20 of 34 inventory items are linked to a supplier, and there are 13 purchase orders and 3 bills. Most of its suppliers would sit at tiers 1–2.
+### 5.1 Red flags
 
----
+A red flag caps the score. It does not subtract from it. A serious problem cannot be averaged away by good results elsewhere. This limits the "compensation" that plain weighted averages allow (Nardo et al., 2008). A flag is checked only when its data exist, so a missing product can never trigger one.
 
-## 4. Time frame and aging
+**Table 13: Red flags and caps**
 
-- **Reference date (`t`):** normally today.
-- **Windows:** T3M (trailing 3 months), P3M (the 3 months before that), T12M (trailing 12 months).
-- **Monthly snapshots:** the score is computed at each month-end, so the output shows a trend.
-- **Aging buckets:** not yet due, 1–30, 31–60, 61–90, 91–120, 121+ days past due. These are the same buckets as Pesa's AR aging report (`GET /accounting/reports/ar-aging`, which takes `as_of_date` for past snapshots). Rent aging uses the same buckets on `RentInvoice`.
-- **Point-in-time reconstruction:** an invoice is open at date `d` if `issue_date ≤ d` and it wasn't fully paid by `d`. The amount open = `grand_total − Σ payments dated ≤ d`.
+| Red flag | Condition | Cap | Basis | Why |
+|---|---|---|---|---|
+| Revenue collapse | T3M ≤ 50% of P3M and, with 15+ months, also ≤ 50% year on year | 40 | S | A fall below half is the "significant decline" test in US small-firm relief (IRS, 2021). The year-on-year check avoids firing on seasonal dips. |
+| Missed payroll | No payroll in 2 months, for a firm that normally runs one | 40 | S | Unpaid staff and payroll taxes are legal breaches. |
+| Cash exhaustion | Runway < 0.67 month (20 days) | 45 | E | Half of small firms hold under 27 days of cash (JPMorgan Chase Institute, 2016). A 20-day line sits below that median, so the flag does not fire for most healthy firms. |
+| Flagship shop collapse | Shop with ≥ 50% of revenue falls to ≤ 50% | 45 | S | Same 50% decline test. |
+| Receivables write-off risk | ≥ 40% of receivables 90+ days past due | 50 | S | 90 days past due is default (BCBS, 2019; IASB, IFRS 9). |
+| Single-customer dependence | Top customer ≥ 70% of revenue | 55 | C | Set well above the 10% major-customer line, so it catches only extreme dependence. |
+| Severe supplier arrears | ≥ 50% of open bills 90+ days past due | 40 | S | Uses the 90-day default line. |
+| Widespread shop decline | ≥ 60% of established shops (min. 2) declining | 55 | C | When most established shops shrink together, the problem is the business, not one location. |
 
----
+The cap levels are conventions (C). Each places the business in the Weak band (cap 40 or 45) or at the top of Watch (50, 55).
 
-## 5. From measures to the score
+### 5.2 Bands
 
-1. **Measure → dimension:** a weighted average of the dimension's available measures, re-normalized within the dimension.
-2. **Dimension → score:** a weighted average of the six dimensions at their **fixed** weights (§2).
-3. **A dimension with no available measure at all** is filled with the **peer median** for that dimension. Peers are businesses of the same `business_type`, or all businesses until there are enough per type. The dimension is flagged as imputed, and confidence is lowered. This keeps the weights fixed: a missing dimension pulls the business neither up nor down relative to its peers.
-4. **Minimum to publish:** at least 3 months of activity in a sales product (Duka, Pesa or Dala), and at most one imputed dimension. Otherwise the result is "Insufficient data".
-5. **Red-flag caps** (§6) are applied last.
+**Table 14: Score bands**
 
-### 5.1 Business vs shop scores
-
-- **Shop score:** the dimensions on the shop's own records. Shops in ramp-up get no score.
-- **Business score:** the dimensions on **consolidated** data, not an average of shop scores. When consolidating:
-  - Stock transfers between the business's own shops are not revenue or cost.
-  - Customers are recorded per shop in BASEPOINT. At business level they're de-duplicated by phone or KRA PIN, the keys the API's cross-branch lookup uses (`/api/customers/other-branches`).
-  - Accounting is per shop. Business-level ledger figures are the sum of the shops' reports.
-  - Records without a `shop_id` (e.g. older orders; shown as "Unknown Shop" in BASEPOINT) count at business level only, and their share is reported.
-
----
-
-## 6. Red flags, bands and benchmarks
-
-### 6.1 Red flags (caps)
-
-Red flags **cap** the score rather than subtracting from it, so a serious problem can't be averaged away. They're checked only when the relevant data exists, so a flag can never fire because a product is missing.
-
-| Red flag | Condition | Cap | Needs |
-|---|---|---|---|
-| Revenue collapse | T3M revenue ≤ 50% of P3M | 40 | Any sales product |
-| Missed payroll | No completed payroll in the last 2 months, for a business that normally runs one | 40 | Bandu or Duka wages |
-| Cash exhaustion | Cash runway < 1 month | 45 | Pesa |
-| Flagship shop collapse | A shop with ≥ 50% of revenue has T3M revenue ≤ 50% of P3M | 45 | 2+ shops |
-| Receivables write-off risk | ≥ 40% of receivables 120+ days past due | 50 | Pesa or Dala |
-| Single-customer dependence | Top customer ≥ 70% of T12M revenue | 55 | Identified customers |
-| Severe supplier arrears | ≥ 50% of open bills 90+ days past due | 40 | Supplier bills |
-| Widespread shop decline | ≥ 60% of established shops (at least 2) declining | 55 | 2+ shops |
-
-### 6.2 Bands
-
-| Score | Band |
-|---|---|
-| 80–100 | Strong |
-| 65–79 | Healthy |
-| 50–64 | Watch |
-| 35–49 | Weak |
-| 0–34 | Distressed |
-
-### 6.3 Sector benchmarks
-
-Once there are ≥ 20 businesses per `business_type`, the Good/Poor thresholds of sector-sensitive measures (margins, DSO, staff cost ÷ revenue, inventory turnover, stock-out rate) move to sector percentiles: Good = 75th, Poor = 10th. Refresh quarterly, and keep thresholds fixed between refreshes.
-
----
-
-## 7. Confidence and product neutrality
-
-### 7.1 Confidence
-
-Reported alongside the score, never added to it:
-
-| Level | Condition |
-|---|---|
-| High | No imputed dimension, ≥ 12 months of activity, and ≥ 60% of all measure weight available |
-| Medium | At most one imputed dimension and ≥ 6 months of activity |
-| Low | Otherwise (still published if §5 point 4 is met) |
-
-The output also lists the **products used** (e.g. "Duka only", "Duka + Pesa + Bandu").
-
-### 7.2 Keeping products neutral
-
-- Dimension weights are fixed (§2); products only add measures inside dimensions.
-- The one intended advantage for using more products is ecosystem depth (§3.6), capped at about 2 points.
-- Every behavioural data point has a weight (§3), so no data is silently ignored, and no product's data counts for more than its measures' weights.
-- The same quantity measured by two products is a single measure with alternative sources, never two measures. Examples: revenue from POS orders and from POS-generated invoices; payroll from Bandu and from Duka wages. Where both exist, the richer source is used: Pesa over the Duka proxy for DSO, Bandu over Duka wages.
-- No measure rewards product usage, data volume or coverage.
-- **Neutrality check (ongoing calibration):** for every business with more than one product, also compute its score using only one product's measures. Across the portfolio, the average gap between the full score and the single-product score should equal the designed ecosystem-depth advantage (at most about 2 points), and no more. A larger or negative gap means a proxy measure's thresholds need recalibrating.
-
----
-
-## 8. Output per business
-
-- **Headline:** score (0–100), band, confidence, products used, trend (Δ vs 3 months ago).
-- **Dimensions:** each dimension's score, whether it was imputed, and its measures (raw value, score, source product).
-- **Shops:** each shop's score, band, trend, share of revenue and status (established / new / dormant), ranked. Plus the share of revenue not linked to any shop.
-- **Aging tables:** receivables and rent, where applicable.
-- **Red flags:** active flags and the cap applied.
-- **Drivers:** the three strongest positive and three strongest negative measures, as plain-language reasons.
-- **History:** monthly snapshots.
-
----
-
-## 9. What real data shows (a BASEPOINT demo business, 2026-09-26)
-
-A read-only look at a live BASEPOINT account shows what the pipeline must handle:
-
-| Observation | Consequence |
-|---|---|
-| 242 orders from Dec 2024 to Sep 2026, but months with no orders (e.g. Aug–Sep 2025, Nov 2025, Aug 2026) | Trading continuity and volatility must handle zero months; low-volume businesses need the minimum-activity rule |
-| About half the records predate the current schema: 119 of 225 invoices and 125 of 242 orders have no `status`, `direction` or `payment_status` | The source adapter needs rules for legacy records. For example, a legacy POS invoice with payments is treated as paid |
-| 25 orders have no `shop_id` | Counted at business level only (§5.1) |
-| Invoice values actually used: `status` = `Paid`, `Pending`, `Partially_Paid`, `Voided`, `Draft`; `direction` = `customer`; `source` = `pos`, `accounting` | Filters in §3.1 are based on these |
-| 92 of the invoices are POS-generated (`source = pos`), duplicates of orders; only 14 are accounting invoices with due dates | Confirms the de-duplication rule; credit sales are a small share for POS-heavy businesses |
-| Only 27 of 242 orders are linked to a customer; customers mostly lack `type`, `lifecycle_stage` and `credit_limit` | Most POS businesses will be "walk-in" for the customer dimension (§3.4) |
-| The business record has a `modules` block (`pos`, `accounting`, `inventory`, `crm`, `payroll`, `dala`, `etims`) with `enabled_at` dates | Use it to detect which products a business uses |
-| Pesa's AR aging report uses exactly the buckets in §4 | Aging can come straight from the report |
-| 10 sales receipts, only 1 linked to an invoice | Unlinked receipts are extra cash sales and count as revenue (§3.1) |
-| 14 suppliers, 13 purchase orders (`partially_delivered`, `fully_delivered`, `approved`, `cancelled`), 3 bills with due and paid dates; 20 of 34 inventory items linked to a supplier | Supplier measures (§3.2, §3.5, §3.6) are usable where businesses record suppliers |
-
----
-
-## 10. Limitations
-
-| # | Limitation | Mitigation |
+| Score | Band | Plain meaning |
 |---|---|---|
-| L1 | Legacy records lack status fields | Source-adapter rules (§9) |
-| L2 | Cost prices are optional and reflect today's price, not the price at the time of sale | Gross margin from Duka only when ≥ 80% of items sold have a cost price; Pesa P&L preferred |
-| L3 | Customers are recorded per shop | De-duplicate by phone or KRA PIN (§5.1) |
-| L4 | Seasonality penalizes T3M vs P3M growth | Year-on-year growth offsets this once 15 months exist |
-| L5 | Multi-currency | Convert to the business's base currency (`accounting_settings.base_currency`) at the document date |
-| L6 | Shop types differ (`pos_mode`: retail, restaurant, hotel, …) | Sector benchmarks per shop type, eventually |
-| L7 | Supplier data is optional and often partial (in the demo account, 20 of 34 inventory items are linked to a supplier) | Supplier measures apply only when data exists; traceability is measured, not assumed |
-| L8 | The API authenticates as a user of one business (company code + PIN or username) | Scoring many businesses needs a service integration agreed with BASEPOINT (§11) |
+| 80–100 | Strong | At or near Good on most measures. |
+| 65–79 | Healthy | Better than halfway on most measures; no serious red flag. |
+| 50–64 | Watch | Around halfway between Good and Poor; some weak areas. |
+| 35–49 | Weak | Below halfway, or capped by a red flag. |
+| 0–34 | Distressed | Poor on most measures. |
 
----
+Basis C. Bands are equal 15-point steps around 50, the point where measures sit on average halfway between Good and Poor. Credit scorecards set cut-offs from observed failure rates (Siddiqi, 2017). Once 12 months of outcomes exist, we will set each cut-off where the failure rate changes clearly.
 
-## 11. Data access (API)
+### 5.3 Sector benchmarks
 
-The API authenticates with a `companycode` header plus a bearer token from `POST /users/login`. The spec's path prefixes aren't always accurate; the actual routes are below:
+Some measures differ too much by sector for one threshold: margins, DSO, staff cost, inventory turnover, stock-outs, staff turnover, transaction volume and value. For these, Good becomes the sector's 75th percentile and Poor its 10th.
 
-| Need | Route |
-|---|---|
-| Products enabled | `POST /tenants/verify` → `modules`, `*_settings.enabled_at` |
-| Shops | `GET /shops` |
-| Orders, with items and payments embedded | `GET /orders` |
-| Invoices | `GET /accounting/invoices?page=&limit=` (not `/invoices` as the spec says) |
-| Sales receipts | `GET /accounting/sales-receipts` |
-| Suppliers | `GET /suppliers` |
-| Purchase orders | `GET /purchase-orders` |
-| Bills | `GET /accounting/bills` |
-| Payables aging | `GET /accounting/reports/ap-aging?shop_id=&as_of_date=` |
-| Inventory | `GET /product-inventory` |
-| Receivables aging | `GET /accounting/reports/ar-aging?shop_id=&as_of_date=` |
-| Ledger | `GET /accounting/reports/profit-loss`, `balance-sheet`, `cash-flow` (per `shop_id`) |
-| Sales receipts | `GET /accounting/sales-receipts` |
-| Customers | `GET /api/customers?shop_id=`, `GET /api/customers/other-branches` |
-| Inventory and low stock | `Duka · Product Inventory` routes; `GET /orders/admin-dashboard/summary` → `lowStockItems` |
-| Payroll | `Bandu · Payroll`, `GET /bandu/reports/payroll-summary` |
-| Property | `GET /dala/reports/property-occupancy`, `rent-collection`; `Dala · Rent Invoices` |
+**Table 15: Sector benchmark rules**
 
----
+| Rule | Value | Basis | Why |
+|---|---|---|---|
+| Minimum firms per business type | 30 | C | With fewer firms the 10th percentile rests on one or two businesses, which is unstable. |
+| Good / Poor percentiles | 75th / 10th | C | Good means better than three in four peers. |
+| Refresh | Quarterly, fixed between | C | Keeps scores comparable within a quarter. |
+| Sector key | Tenant business type, checked against shop mode | C | Shop point-of-sale modes are often left at defaults (e.g. a spa's shops typed "restaurant"), which would compare it with the wrong peers. |
 
-## 12. Pipeline (design only)
+## 6 Explaining a score to a business
 
-| Component | Role |
-|---|---|
-| Source adapter | Reads each business's data via the API; applies legacy-record rules; de-duplicates POS invoices |
-| Product detection | Reads enabled modules and which ones actually hold data |
-| Snapshot builder | Reconstructs revenue, receivables and balances at each month-end |
-| Measure library | One function per measure, per source product, each returning "not available" when its data is missing |
-| Aggregator | Measures → dimensions → score; imputation; confidence; red-flag caps; per shop and consolidated |
-| Neutrality check | The single-product comparison in §7.2, run across the portfolio |
+This section is for staff who walk a business through its score. It uses an illustrative business. The numbers are made up to show the method.
 
-Build order: source adapter and product detection → Duka measures (every business has at least one sales product, and Duka is the most common) → aggregator and output → Pesa measures → Dala, Bandu and Mteja measures → neutrality check → sector benchmarks.
+### 6.1 What to say first
 
----
+- Your score is a number from 0 to 100. Higher is healthier.
+- It comes only from what you record in BASEPOINT. Nobody fills in a form.
+- It looks at six areas: sales, cash, profit, customers, stability and formality.
+- Each area is scored from 0 to 100. The six are then combined with fixed weights. Cash counts most, at 25%.
+- A serious problem, such as missed payroll, caps the score. Good results elsewhere cannot hide it.
+- Using more BASEPOINT products gives more evidence, not more points.
 
-## 13. Decisions needed
+### 6.2 Worked example
 
-1. Dimension weights (§2), measure weights and Good/Poor thresholds (§3), including whether Formality and compliance (§3.6) belongs in the health score.
-2. Scale thresholds for daily transaction volume and value (§3.1), until sector benchmarks exist.
-3. The size of the ecosystem-depth advantage (§3.6): its weight and its 1-to-4+ product scale.
-4. Supplier tracking tiers and the tracking factor range (0.75×–1.25×) (§3.9).
-5. Red-flag conditions and caps (§6.1).
-6. The publication rule and imputation approach (§5).
-7. Shop ramp-up length (3 months proposed).
-8. How the scoring service accesses many businesses' data (L8).
+The illustrative business is a two-shop hardware retailer that uses Duka and Pesa. It sells partly on credit.
 
----
+**Step 1. One measure becomes a score.** Each measure is placed on a line between its Poor value (score 0) and its Good value (score 100). The score is the share of that distance the business has covered.
 
-## 14. Implementation
+- **Cash realization (higher is better).** The business received KES 88 for every KES 100 it sold, so the value is 88%. Poor is 60% and Good is 95%. The distance from Poor to Good is 35 points. The business has covered 28 of them. 28 ÷ 35 = 0.80, so the measure scores 80.
+- **Days sales outstanding (lower is better).** Customers take 63 days on average to pay. Poor is 90 days and Good is 45 days. The distance is 45 days. The business is 27 days better than Poor. 27 ÷ 45 = 0.60, so the measure scores 60.
 
-The application is in the `health_score` package. The scoring rules (dimensions, measures, weights and thresholds) are in `health_score/scoring/registry.py`. For the structure of the application, refer to [Architecture](../architecture.md). For the API, refer to [API reference](../api.md).
+**Step 2. Measures become a dimension score.** Suppose the business has data for five cash measures. Their weights add up to 57. They are scaled up to 100, so each keeps its share. Measures with no data, such as rent collection, do not add or remove points.
 
-| Task | Command |
-|---|---|
-| Start the API | `uvicorn health_score.api.app:app --port 8100` |
-| Score a business | `POST /v1/scores` with `company_code`, `pin`, and optional `username` and `as_of_date` |
-| Start the web page | `streamlit run streamlit_app.py` |
-| Run the tests | `pytest` |
+**Table 16: Illustrative business: cash, collections and payables**
 
-The API and the web page use the same service. The service logs in to BASEPOINT as the business, collects every dataset its products hold (approximately 40 endpoints, in parallel), calculates the score and returns the full result. The application does not store data. It uses the credentials for one request only and does not write them to the log. It reads only whitelisted business fields from `/tenants/verify`.
+| Measure | Value | Good | Poor | Score | Weight | Weight used (%) |
+|---|---|---|---|---|---|---|
+| Cash realization | 88% | ≥ 95% | ≤ 60% | 80 | 19 | 33.3 |
+| Severe overdue receivables | 12% | ≤ 5% | ≥ 40% | 80 | 11 | 19.3 |
+| Days sales outstanding | 63 days | ≤ 45 | ≥ 90 | 60 | 9 | 15.8 |
+| Collection effectiveness index | 62% | ≥ 80% | ≤ 50% | 40 | 6 | 10.5 |
+| Cash runway | 0.8 months | ≥ 2 | ≤ 0.5 | 20 | 12 | 21.1 |
+| **Cash dimension** | | | | **60.0** | **57** | **100.0** |
 
-Decisions made while implementing:
+Dimension score = (19 × 80 + 11 × 80 + 9 × 60 + 6 × 40 + 12 × 20) ÷ 57 = 3,420 ÷ 57 = 60.0. The five measures carry more than half of the dimension's weight (57%), so the credibility rule does not change the result. The test `test_worked_example_cash_dimension` checks this example against the engine.
 
-- **Books-coverage guard.** Ledger-based measures (P&L gross margin, net margin, cash runway) are used only when P&L revenue covers ≥ 80% of the sales seen in transactions. In the demo business the books cover 30% of sales. Without the guard, it showed a 99.7% gross margin (almost no cost of sales posted) and 555 months of cash runway (bank outflows barely recorded).
-- **Payables come from the bills themselves**, not the AP aging report. In the demo business the AP aging report showed 0 outstanding, while two bills were 120+ days overdue.
-- **Not yet measurable from the API:** shift regularity (`/shifts` returns the weekly rota, not shifts actually opened) and asset trend (no asset data). They stay in the register and apply once data exists.
-- **Imputed dimensions** use 50 until enough businesses have been scored to compute peer medians.
-- **Sales targets** are measured against revenue computed from transactions for the target period, because BASEPOINT's `actual_value` was 0 even where sales existed.
-- **Orders are fetched month by month** (16 months, in parallel). The full order list times out (HTTP 502) for large businesses; one BASEPOINT business with ~1,000 orders a month returned "insufficient data" until this change.
-- **A failed sales endpoint is reported, never scored as missing data.** If BASEPOINT doesn't return sales, the result is "Data unavailable" with the failing endpoint listed, not "Insufficient data".
-- **Purchase-pattern measures need at least 3 purchase documents** (purchase orders or bills) in 12 months: supplier concentration, fill rate, procurement regularity, sell-through, stock cover and purchase alignment. One purchase order automatically makes "top supplier = 100% of purchases", which isn't a signal. Payables measures still apply to any bill, since an overdue bill is a real debt.
-- **Receipting is measured from the first order with a receipt number.** Receipt numbers only appear on BASEPOINT orders from mid-2026, so earlier orders can't have them.
+## 7 Implementation notes
+
+These notes say how the engine applies rules that the methodology leaves open.
+
+- **Peer medians and sector percentiles.** No peer data exists yet. The engine uses 50 as the peer median. Revenue per staff member and capacity utilization have sector-percentile thresholds only, so they do not get a score yet. The response shows their values in `measures_pending_benchmark`. The other sector-relative measures use the interim values in the tables until 30 businesses of a type have a score.
+- **Sector.** The engine reads the sector from the tenant business type (for example `massage_parlour` is personal services). An unknown type uses "other".
+- **Tax registration and eTIMS.** Neither VAT nor eTIMS scores 0. Registration scores 50. The score rises in a straight line to 100 at 90% of accounting invoices verified with eTIMS.
+- **Inventory turnover.** Until sector percentiles exist, every sector uses 6 (Good) and 1 (Poor).
+- **Days past due.** "90+ days past due" means more than 90 days after the due date, the 91–120 and 121+ aging buckets.
+- **Confidence.** High: no imputed dimension, 12+ months of history and 60%+ of the measure weight with data. Medium: at most one imputed dimension and 6+ months of history. Otherwise Low.
+
+## Appendix A: Measure definitions and data sources
+
+Products: D = Duka, P = Pesa, B = Bandu, M = Mteja, L = Dala (property). The same quantity from two products is one measure with alternative sources, never two measures. Where both exist, the richer source is used: Pesa over the Duka proxy for DSO, Bandu over Duka wages.
+
+**Table 17: Measure definitions**
+
+| Measure | Definition and data points | Products |
+|---|---|---|
+| **Sales performance** | | |
+| Daily transaction volume | Average transactions per trading day, T3M. A transaction is one completed order, unlinked sales receipt, accounting invoice or rent invoice. | D, P, L |
+| Daily transaction value | Average revenue per trading day, T3M. | D, P, L |
+| Revenue growth | Revenue T3M vs P3M. | D, P, L |
+| Year-on-year growth | Revenue T3M vs the same 3 months a year earlier. Needs 15+ months. | D, P, L |
+| Revenue volatility | Coefficient of variation of monthly revenue, T12M. Zero months included. | D, P, L |
+| Trading continuity | Months with revenue in T12M. | D, P, L |
+| Trading days share | Days with sales ÷ days in T3M. | D, P |
+| Transaction count trend | Transaction count T3M vs P3M. | D, P, L |
+| Average transaction value trend | Revenue ÷ transactions, T3M vs P3M. | D, P |
+| Revenue leakage | (Discounts + voided items) ÷ gross sales. | D, P |
+| Refunds and credit notes | Refunds and credit notes ÷ revenue. | P |
+| Recurring revenue share | Subscriptions, packages and leases ÷ revenue. | D, L |
+| Forward bookings ratio | Bookings scheduled in the next 30 days ÷ the last 30 days. | D |
+| Sales target attainment | Actual ÷ target, using revenue computed from transactions. | M |
+| Lead conversion rate | Won leads ÷ closed leads, T6M. | M |
+| **Cash, collections and payables** | | |
+| Cash realization | Cash received (order payments, invoice payments, receipts, rent payments) ÷ revenue, T3M. | D, P, L |
+| Severe overdue receivables | Receivables 90+ days past due ÷ total open receivables. From AR and rent aging. | P, L |
+| Days sales outstanding | Receivables ÷ credit sales in T3M × 90. Duka proxy: sum of customer balances. | P, L, D |
+| Weighted average days past due | Days past due weighted by open amount. | P, L |
+| Collection effectiveness index | (Opening receivables + credit sales − closing receivables) ÷ (opening receivables + credit sales − current receivables), T3M. | P, L |
+| Aging drift | 3-month change in the severe overdue ratio. | P, L |
+| Cash runway | Bank balances ÷ average monthly outflow, from the cash-flow report. Needs the books-coverage guard. | P |
+| Customers over credit limit | Customers with balance above credit limit ÷ customers with a limit. | D, P |
+| Rent collection rate | Rent paid ÷ rent invoiced, T3M. | L |
+| Payment-plan collection | Instalments paid ÷ instalments due. | L |
+| Gift-card liability | Unredeemed gift-card balance ÷ monthly revenue. | D |
+| Severe overdue payables | Bills 90+ days past due ÷ open bills. From the bills themselves, not the AP aging report. | P |
+| Bills paid on time | Bills paid by due date ÷ bills due, T6M. | P |
+| DPO ÷ supplier terms | Days payables outstanding ÷ agreed supplier payment terms. | P, D |
+| **Profitability and cost control** | | |
+| Gross margin | (Revenue − cost of goods sold) ÷ revenue. Cost source in order of preference: actual purchase cost of tracked stock; ledger; sold quantity × supplier price (if ≥ 80% of items sold have a cost); recipes. | P, D |
+| Net margin | (Revenue − expenses) ÷ revenue, from the profit and loss. | P |
+| Staff cost ÷ revenue | Payroll gross pay or Duka wages ÷ revenue. | B, D |
+| Cost discipline | Expense growth minus revenue growth, T3M vs P3M. | P |
+| Revenue per staff member | Monthly revenue ÷ staff count or active employees. | D, B |
+| Maintenance cost ÷ rent income | Maintenance costs ÷ rent income. | L |
+| Commission cost ÷ property sales | Commissions ÷ property sales. | L |
+| Purchase-to-sales alignment | Purchases of tracked stock ÷ cost of that stock sold, T3M. | D, P |
+| **Customer and revenue base** | | |
+| Top customer's share | Largest customer's share of T12M revenue (tenants count as customers). | D, P, L |
+| Customer retention | Share of P3M customers who bought again in T3M; lease renewals for property. | D, P, L |
+| Active-customer trend | Active customers T3M vs P3M. | D, P, L |
+| Revenue concentration (HHI) | Sum of squared customer revenue shares, T12M. | D, P, L |
+| Transaction breadth | Largest single sale's share of T12M revenue. | D, P |
+| Product concentration | Top product's share of revenue. | D |
+| New customers per month | New customers T3M vs P3M. | D, M |
+| Customer visit trend | Visits T3M vs P3M. | D, M |
+| Customer satisfaction | Average feedback rating (1–5). | D |
+| Loyalty engagement | Revenue from loyalty, gift-card and subscription customers ÷ revenue. | D |
+| At-risk revenue | Revenue from customers in at-risk or churned stages ÷ revenue. | M |
+| **Operational stability** | | |
+| Business tenure | Months since the first transaction or tenant creation. | Any |
+| Staff count trend | Staff now vs 6 months ago. | D, B |
+| Staff turnover | Exits ÷ average headcount, T12M. | B |
+| Payroll regularity | Months with completed payroll in T6M ÷ 6. | B, D |
+| Shift regularity | Trading days with an opened shift ÷ trading days. | D |
+| Key-person dependence | Top staff member's share of sales. | D |
+| Stock-out rate | Selling items below minimum quantity ÷ selling items. | D |
+| Inventory turnover | Cost of goods sold T12M ÷ average inventory at cost. | D |
+| Dead stock | Value of items unsold in 90 days ÷ inventory value. | D |
+| Catalogue activity | Active products sold in T3M ÷ active products. | D |
+| Capacity utilization | Orders per table per trading day (restaurants); room nights ÷ available rooms (hotels). | D |
+| Occupancy | Occupied units ÷ total units. | L |
+| Maintenance backlog | Open tickets older than 30 days ÷ open tickets. | L |
+| Shop network | Average of the four sub-measures in Table 10. | D |
+| Unplanned leave | Unplanned leave days ÷ working days. | B |
+| Asset base trend | Net book value now vs 12 months ago. | P |
+| Supplier concentration | Top supplier's share of purchases, T12M. | D, P |
+| Delivery fill rate | Quantity received ÷ quantity ordered on purchase orders, T6M. | D |
+| Procurement regularity | Months with purchases in T6M ÷ 6. | D, P |
+| Sell-through | Units sold ÷ units received per supplier, weighted by purchase value, T6M. | D |
+| Stock cover | Days of sales the tracked stock on hand covers. | D |
+| **Formality and compliance** | | |
+| Digital payment share | M-Pesa, card and Pesapal payments ÷ all payments. | D, P |
+| Tax registration and eTIMS | VAT enabled; share of invoices verified with KRA eTIMS. | D, P |
+| Receipting | Sales with a receipt issued ÷ sales, from the first receipted order. | D, P |
+| Bookkeeping regularity | Months with posted journal entries in T6M ÷ 6. | P |
+| Bank reconciliation recency | Days since the last completed reconciliation. | P |
+| Statutory payroll compliance | Payroll runs with statutory deductions processed; P9 forms generated. | B |
+| Platform standing | BASEPOINT subscription active and paid on time. | Any |
+| Supply-chain traceability index | Inventory value weighted by supplier tracking tier (Table 12). | D, P |
+
+## References
+
+- Altman, E. I. (1968). Financial ratios, discriminant analysis and the prediction of corporate bankruptcy. *Journal of Finance*, 23(4), 589–609.
+- Altman, E. I., & Sabato, G. (2007). Modelling credit risk for SMEs: Evidence from the U.S. market. *Abacus*, 43(3), 332–357.
+- Basel Committee on Banking Supervision (2019). *The Basel Framework*, CRE36.69: definition of default (90 days past due).
+- U.S. Bureau of Labor Statistics (2024). 34.7 percent of business establishments born in 2013 were still operating in 2023. *The Economics Daily*.
+- U.S. Bureau of Labor Statistics (2025). Job Openings and Labor Turnover Survey, January 2025: accommodation and food services separations rate 5.2%.
+- Bühlmann, H. (1967). Experience rating and credibility. *ASTIN Bulletin*, 4(3), 199–207.
+- Central Bank of Kenya (2013). Prudential Guidelines, CBK/PG/04: Risk classification of assets and provisioning.
+- Complete Controller (2025). Restaurant cost benchmarks.
+- U.S. Department of Justice and Federal Trade Commission (2023). *Merger Guidelines*.
+- Dun & Bradstreet. PAYDEX score: 80–100 pays within terms (low risk); 50–79 up to 15 days late; below 50 30+ days late.
+- Financial Accounting Standards Board. ASC 280-10-50-42: disclosure of any single customer providing 10% or more of revenue.
+- FinRegLab (2019). *The Use of Cash-Flow Data in Underwriting Credit: Empirical Research Findings*.
+- Republic of Kenya (2023). Finance Act, 2023: expenses not supported by an eTIMS invoice disallowed from 1 January 2024.
+- Gruen, T. W., Corsten, D. S., & Bharadwaj, S. (2002). *Retail Out-of-Stocks: A Worldwide Examination of Extent, Causes and Consumer Responses*.
+- International Accounting Standards Board. IFRS 9 Financial Instruments, paragraphs 5.5.11 and B5.5.37.
+- Internal Revenue Service (2021). Notice 2021-20: significant decline in gross receipts.
+- Farrell, D., & Wheat, C. (2016). *Cash Is King: Flows, Balances, and Buffer Days*. JPMorgan Chase Institute.
+- Kenya National Bureau of Statistics (2016). *Micro, Small and Medium Establishments (MSME) Survey: Basic Report*.
+- La Porta, R., & Shleifer, A. (2014). Informality and development. *Journal of Economic Perspectives*, 28(3), 109–126.
+- Nardo, M., et al. (2008). *Handbook on Constructing Composite Indicators: Methodology and User Guide*. OECD and European Commission JRC.
+- Reichheld, F. F., & Sasser, W. E. (1990). Zero defections: Quality comes to services. *Harvard Business Review*, 68(5), 105–111.
+- U.S. Small Business Administration (2021). Second Draw PPP loans: 25% reduction in gross receipts requirement.
+- Siddiqi, N. (2017). *Intelligent Credit Scoring* (2nd ed.). Wiley.
+- Strategies. The dirty truth about salon and spa service payroll costs.
+- Republic of Kenya (2015). Tax Procedures Act, section 23: keeping of records for five years.
+- Versapay. Collection effectiveness index (CEI): 80% or above is considered good.

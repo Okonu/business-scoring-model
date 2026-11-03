@@ -24,8 +24,8 @@ This endpoint shows that the API operates.
 ```json
 {
   "status": "ok",
-  "version": "0.2.0",
-  "engine_version": "0.2.0"
+  "version": "0.3.0",
+  "engine_version": "0.3.0"
 }
 ```
 
@@ -68,9 +68,10 @@ Use an administrator login. A user who is not an administrator can see fewer sho
 | `products_used` | list of strings | The BASEPOINT products that had activity in the last 3 months |
 | `measure_weight_available` | number | The part of the total measure weight that has data (0 to 1) |
 | `business` | object | The business details |
-| `dimensions` | object | The score of each of the 6 dimensions |
-| `measures` | list | Each measure that has data: its value, score and weight |
+| `dimensions` | object | The score of each of the 6 dimensions. Each dimension also has `measured_score` (the average of its measures), `credibility` (0 to 1) and `measured_share` (the part of its weight that has data). |
+| `measures` | list | Each measure that has data: its value, score, weight and `basis` (S, E, B or C) |
 | `measures_not_available` | list | The measures that do not have data |
+| `measures_pending_benchmark` | list | The measures that have data but do not get a score until sector benchmarks exist |
 | `red_flags` | list | The red flags and the limit that each red flag sets |
 | `drivers` | object | The 3 strongest and the 3 weakest measures |
 | `shops` | list | The score and revenue of each shop |

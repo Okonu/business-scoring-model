@@ -31,6 +31,14 @@ def test_score_returns_everything_the_page_shows(business_lists):
     assert "1234" not in r.text
 
 
+def test_score_returns_the_methodology_details(business_lists):
+    body = client_for(business_lists).post("/v1/scores", json=BODY).json()
+    assert body["engine_version"] == "0.3.0"
+    assert {"measured_score", "credibility", "measured_share"} <= set(body["dimensions"]["profit"])
+    assert all(m["basis"] in {"S", "E", "B", "C"} for m in body["measures"])
+    assert {m["id"] for m in body["measures_pending_benchmark"]} == {"revenue_per_staff"}
+
+
 def test_wrong_pin_returns_401(business_lists):
     r = client_for(business_lists).post("/v1/scores", json={**BODY, "pin": "0000"})
     assert r.status_code == 401

@@ -41,6 +41,9 @@ class Dimension(BaseModel):
     label: str
     weight: float
     score: float
+    measured_score: float | None
+    credibility: float
+    measured_share: float
     imputed: bool
     measures_available: int
     measures_total: int
@@ -58,12 +61,21 @@ class Measure(BaseModel):
     weight_in_dimension: float
     weight_in_score: float
     supplier: bool
+    basis: str
 
 
 class MeasureUnavailable(BaseModel):
     id: str
     label: str
     dimension: str
+
+
+class MeasurePendingBenchmark(BaseModel):
+    id: str
+    label: str
+    dimension: str
+    value: float
+    unit: str
 
 
 class RedFlag(BaseModel):
@@ -128,6 +140,7 @@ class ScoreResponse(BaseModel):
     dimensions: dict[str, Dimension]
     measures: list[Measure]
     measures_not_available: list[MeasureUnavailable]
+    measures_pending_benchmark: list[MeasurePendingBenchmark]
     red_flags: list[RedFlag]
     drivers: Drivers
     shops: list[Shop]

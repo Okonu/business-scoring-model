@@ -116,7 +116,6 @@ def make_business(days=540, daily=4, amount=1000, decline_last_90=False):
         "/orders": orders,
         "/api/customers": customers,
         "/product-inventory": inventory,
-        # POS orders create invoices automatically; these must not be counted again
         "/accounting/invoices": [
             {
                 "_id": f"inv{o['_id']}",
@@ -132,7 +131,7 @@ def make_business(days=540, daily=4, amount=1000, decline_last_90=False):
     }
 
 
-def make_purchase_order(n, days_ago, supplier="s1"):
+def make_purchase_order(n, days_ago, supplier="s1", quantity=50):
     return {
         "_id": f"po{n}",
         "shop_id": "shopA",
@@ -142,8 +141,8 @@ def make_purchase_order(n, days_ago, supplier="s1"):
         "po_items": [
             {
                 "inventory_id": {"_id": "i0", "name": "Flour"},
-                "quantity_ordered": 50,
-                "quantity_received": 50,
+                "quantity_ordered": quantity,
+                "quantity_received": quantity,
                 "unit_price": 600,
             }
         ],

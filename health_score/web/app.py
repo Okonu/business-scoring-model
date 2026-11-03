@@ -19,8 +19,7 @@ import streamlit as st
 
 from health_score.basepoint import AuthenticationError, BasepointUnavailableError
 from health_score.logging_config import configure_logging
-from health_score.scoring import ENGINE_VERSION
-from health_score.scoring.engine import band
+from health_score.scoring import ENGINE_VERSION, band
 from health_score.service import Credentials, ScoringService
 from health_score.settings import get_settings
 
